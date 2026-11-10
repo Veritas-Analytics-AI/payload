@@ -21,13 +21,26 @@ type Props<T> = {
 } & Omit<RowLabelType<T>, 'data'>
 
 export const RowLabelProvider: React.FC<Props<unknown>> = ({ children, path, rowNumber }) => {
+  // The context value stays a new object on every render, as it was while `data` was built on
+  // every render, so that a row label reading `data` keeps following the form.
+  'use no memo'
   const { getDataByPath, getSiblingData } = useWatchForm()
-  const collapsibleData = getSiblingData(path)
-  const arrayData = getDataByPath(path)
 
-  const data = arrayData || collapsibleData
-
-  const contextValue = React.useMemo(() => ({ data, path, rowNumber }), [data, path, rowNumber])
+  // The row's data is built when a row label reads it: both getters walk every field of the form,
+  // and every row called them on every render.
+  let data: unknown
+  let isRead = false
+  const contextValue = {
+    get data() {
+      if (!isRead) {
+        data = getDataByPath(path) || getSiblingData(path)
+        isRead = true
+      }
+      return data
+    },
+    path,
+    rowNumber,
+  }
 
   return <RowLabel value={contextValue}>{children}</RowLabel>
 }
