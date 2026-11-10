@@ -2,7 +2,7 @@
 import { dequal } from 'dequal/lite' // lite: no need for Map and Set support
 import { useRouter } from 'next/navigation.js'
 import { serialize } from 'object-to-formdata'
-import { type FormState, type PayloadRequest } from 'payload'
+import { type Data, type FormState, type PayloadRequest } from 'payload'
 import {
   deepCopyObjectSimpleWithoutReactComponents,
   getDataByPath as getDataByPathFunc,
@@ -164,6 +164,7 @@ export const Form: React.FC<FormProps> = (props) => {
 
   const formRef = useRef<HTMLFormElement>(null)
   const contextRef = useRef({} as FormContextType)
+  const dataRef = useRef<{ data?: Data; fields?: FormState }>({})
   const abortResetFormRef = useRef<AbortController>(null)
   const isFirstRenderRef = useRef(true)
 
@@ -560,7 +561,15 @@ export const Form: React.FC<FormProps> = (props) => {
 
   const getField = useCallback((path: string) => contextRef.current.fields[path], [])
 
-  const getData = useCallback(() => reduceFieldsToValues(contextRef.current.fields, true), [])
+  // The data is built once per form state: building it walks every field, and each field's
+  // validation asks for it after a change.
+  const getData = useCallback(() => {
+    const fields = contextRef.current.fields
+    if (dataRef.current.fields !== fields) {
+      dataRef.current = { data: reduceFieldsToValues(fields, true), fields }
+    }
+    return dataRef.current.data
+  }, [])
 
   const getSiblingData = useCallback(
     (path: string) => getSiblingDataFunc(contextRef.current.fields, path),
