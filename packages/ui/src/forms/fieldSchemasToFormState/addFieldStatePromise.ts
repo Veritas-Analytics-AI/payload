@@ -461,7 +461,7 @@ export const addFieldStatePromise = async (args: AddFieldStatePromiseArgs): Prom
               ) as FlattenedBlock | undefined)
 
             if (!block) {
-              throw new Error(
+              console.warn(
                 `Block with type "${row.blockType}" was found in block data, but no block with that type is defined in the config for field with schema path ${schemaPath}.`,
               )
             }
@@ -1021,11 +1021,7 @@ export const addFieldStatePromise = async (args: AddFieldStatePromiseArgs): Prom
     const fieldConfig = fieldSchemaMap.get(schemaPath)
 
     if (!fieldConfig && !mockRSCs) {
-      if (schemaPath.endsWith('.blockType')) {
-        return
-      } else {
-        throw new Error(`Field config not found for ${schemaPath}`)
-      }
+      return
     }
 
     if (!state[path]) {
