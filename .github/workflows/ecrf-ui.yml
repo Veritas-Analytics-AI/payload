@@ -1,0 +1,92 @@
+name: ecrf ui
+
+# Builds @payloadcms/ui from this branch and attaches the tarball to a release, which ecrf installs.
+# Runs when a tag named ui-<payload version>-ecrf.<n> is pushed. Upstream's own workflows are
+# removed from this branch, so that nothing else runs in the fork.
+
+on:
+  push:
+    tags:
+      - 'ui-*'
+
+permissions:
+  contents: read
+
+env:
+  TURBO_TELEMETRY_DISABLED: 1
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+
+      - uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320 # v5.0.0
+        with:
+          run_install: false
+
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version-file: .tool-versions
+
+      - name: Read the package's version
+        run: |
+          VERSION=$(node -p "require('./packages/ui/package.json').version")
+          echo "VERSION=$VERSION" >> "$GITHUB_ENV"
+          case "$GITHUB_REF_NAME" in
+            "ui-$VERSION-ecrf."*) ;;
+            *)
+              echo "::error::The tag $GITHUB_REF_NAME is not named ui-$VERSION-ecrf.<n>."
+              exit 1
+              ;;
+          esac
+
+      - name: Build this branch's package
+        run: |
+          pnpm install --frozen-lockfile --ignore-scripts --filter "@payloadcms/ui..." --filter payload-monorepo
+          pnpm turbo build --filter @payloadcms/ui
+          cd packages/ui
+          pnpm pack --pack-destination "$RUNNER_TEMP/fork"
+
+      - name: Build upstream's tag the same way
+        run: |
+          git clone --depth 1 --branch "v$VERSION" https://github.com/payloadcms/payload.git "$RUNNER_TEMP/upstream-source"
+          cd "$RUNNER_TEMP/upstream-source"
+          pnpm install --frozen-lockfile --ignore-scripts --filter "@payloadcms/ui..." --filter payload-monorepo
+          pnpm turbo build --filter @payloadcms/ui
+          cd packages/ui
+          pnpm pack --pack-destination "$RUNNER_TEMP/upstream"
+
+      # Proves the build: what differs between this branch's package and npm's then comes from this
+      # branch's commits alone.
+      - name: Check that upstream's build is the package npm ships
+        working-directory: ${{ runner.temp }}
+        run: |
+          npm pack "@payloadcms/ui@$VERSION" --pack-destination npm
+          for build in fork upstream npm; do
+            mkdir "$build/files"
+            tar -xzf "$build/payloadcms-ui-$VERSION.tgz" -C "$build/files"
+          done
+          diff -r npm/files upstream/files
+
+      - name: Release the tarball
+        working-directory: ${{ runner.temp }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          {
+            echo "\`@payloadcms/ui\` $VERSION, built from $GITHUB_SHA."
+            echo
+            echo "Upstream's \`v$VERSION\`, built the same way in this run, gave the files npm ships. This build differs from them in:"
+            echo
+            echo '```'
+            diff -rq npm/files fork/files | sed -E 's#^Files npm/files/package/(.*) and .* differ$#\1#' || true
+            echo '```'
+            echo
+            echo "sha512 of the tarball: $(openssl dgst -sha512 -binary "fork/payloadcms-ui-$VERSION.tgz" | base64 -w 0)"
+          } > notes.md
+          gh release create "$GITHUB_REF_NAME" "fork/payloadcms-ui-$VERSION.tgz" \
+            --repo "$GITHUB_REPOSITORY" --verify-tag --title "$GITHUB_REF_NAME" --notes-file notes.md
