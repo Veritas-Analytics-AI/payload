@@ -65,6 +65,7 @@ jobs:
       - name: Check that upstream's build is the package npm ships
         working-directory: ${{ runner.temp }}
         run: |
+          mkdir npm
           npm pack "@payloadcms/ui@$VERSION" --pack-destination npm
           for build in fork upstream npm; do
             mkdir "$build/files"
