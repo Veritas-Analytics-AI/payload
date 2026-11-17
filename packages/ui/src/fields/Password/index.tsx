@@ -23,6 +23,7 @@ const PasswordFieldComponent: React.FC<PasswordFieldProps> = (props) => {
     field: {
       admin: {
         className,
+        description,
         disabled: disabledFromProps,
         placeholder,
         rtl,
@@ -33,6 +34,7 @@ const PasswordFieldComponent: React.FC<PasswordFieldProps> = (props) => {
     } = {} as PasswordFieldProps['field'],
     inputRef,
     path,
+    readOnly,
     validate,
   } = props
 
@@ -62,7 +64,7 @@ const PasswordFieldComponent: React.FC<PasswordFieldProps> = (props) => {
           },
           t,
         } as unknown as PayloadRequest,
-        required: true,
+        required,
         siblingData: {},
       })
     },
@@ -95,6 +97,7 @@ const PasswordFieldComponent: React.FC<PasswordFieldProps> = (props) => {
       autoComplete={autoComplete}
       BeforeInput={BeforeInput}
       className={className}
+      description={description}
       Description={Description}
       Error={Error}
       inputRef={inputRef}
@@ -106,7 +109,7 @@ const PasswordFieldComponent: React.FC<PasswordFieldProps> = (props) => {
       }}
       path={path}
       placeholder={placeholder}
-      readOnly={disabled || disabledFromProps}
+      readOnly={readOnly || disabled || disabledFromProps}
       required={required}
       rtl={renderRTL}
       showError={showError}
