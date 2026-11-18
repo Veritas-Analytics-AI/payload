@@ -67,6 +67,7 @@ export const CollectionListHeader: React.FC<ListHeaderProps> = ({
   onBulkUploadSuccess,
   openBulkUpload,
   smallBreak,
+  TitleActions = [],
   viewType,
 }) => {
   const { config, getEntityConfig } = useConfig()
@@ -157,6 +158,7 @@ export const CollectionListHeader: React.FC<ListHeaderProps> = ({
             key="list-header-empty-trash"
           />
         ),
+        ...(isTrashRoute ? [] : TitleActions),
       ].filter(Boolean)}
     />
   )
