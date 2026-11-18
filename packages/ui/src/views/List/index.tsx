@@ -34,7 +34,11 @@ import './index.scss'
 
 const baseClass = 'collection-list'
 
-export function DefaultListView(props: ListViewClientProps) {
+export function DefaultListView(
+  // A collection's `admin.components.listTitleActions`, which our patch of `payload` adds to the
+  // import map and our patch of `@payloadcms/next` renders.
+  props: { listTitleActions?: React.ReactNode[] } & ListViewClientProps,
+) {
   const {
     AfterList,
     AfterListTable,
@@ -52,6 +56,7 @@ export function DefaultListView(props: ListViewClientProps) {
     hasDeletePermission,
     hasTrashPermission,
     listMenuItems,
+    listTitleActions,
     newDocumentURL,
     queryPreset,
     queryPresetPermissions,
@@ -190,6 +195,7 @@ export function DefaultListView(props: ListViewClientProps) {
                 newDocumentURL={newDocumentURL}
                 openBulkUpload={openBulkUpload}
                 smallBreak={smallBreak}
+                TitleActions={listTitleActions}
                 viewType={viewType}
               />
               <ListControls
