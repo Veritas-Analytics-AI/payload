@@ -19,11 +19,22 @@ const initialContext: ThemeContext = {
 
 const Context = createContext(initialContext)
 
+// A browser refuses a cookie whose name starts with __Host- or __Secure- unless it is Secure, so a
+// `cookiePrefix` with either prefix would keep no theme.
+const SECURE_COOKIE_NAME_PATTERN = /^__(?:Host|Secure)-/
+
 function setCookie(cname, cvalue, exdays) {
   const d = new Date()
   d.setTime(d.getTime() + exdays * 24 * 60 * 60 * 1000)
   const expires = 'expires=' + d.toUTCString()
-  document.cookie = cname + '=' + cvalue + ';' + expires + ';path=/'
+  document.cookie =
+    cname +
+    '=' +
+    cvalue +
+    ';' +
+    expires +
+    ';path=/' +
+    (SECURE_COOKIE_NAME_PATTERN.test(cname) ? ';Secure' : '')
 }
 
 const getTheme = (
