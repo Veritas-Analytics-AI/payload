@@ -340,7 +340,15 @@ export const traverseFields = ({
       case 'tab': {
         const fieldSelect = select?.[field.name]
 
-        if (fieldSelect === false) {
+        // A select that names the fields to include and leaves this group out selects
+        // nothing in it. Traversed without a select, every array in it would be joined.
+        if (
+          fieldSelect === false ||
+          (select &&
+            selectMode === 'include' &&
+            typeof fieldSelect === 'undefined' &&
+            !forceWithFields)
+        ) {
           break
         }
 
@@ -677,7 +685,10 @@ export const traverseFields = ({
       }
 
       default: {
-        if (forceWithFields) {
+        // A level traversed without a select is selected whole: an array or a block that
+        // the select takes whole, or any of them in a select that excludes fields. Its
+        // hasMany fields need their tables, which a field joins only when it is selected.
+        if (forceWithFields || !select) {
           if (
             (field.type === 'relationship' || field.type === 'upload') &&
             (field.hasMany || Array.isArray(field.relationTo))
