@@ -34,11 +34,7 @@ import './index.scss'
 
 const baseClass = 'collection-list'
 
-export function DefaultListView(
-  // A collection's `admin.components.listTitleActions`, which our patch of `payload` adds to the
-  // import map and our patch of `@payloadcms/next` renders.
-  props: { listTitleActions?: React.ReactNode[] } & ListViewClientProps,
-) {
+export function DefaultListView(props: ListViewClientProps) {
   const {
     AfterList,
     AfterListTable,

@@ -443,6 +443,10 @@ export type CollectionAdminOptions = {
       Upload?: CustomUpload
     }
     listMenuItems?: CustomComponent[]
+    /**
+     * Inject custom components after the list's "Create New" button, beside its title
+     */
+    listTitleActions?: CustomComponent[]
     views?: {
       /**
        * Add custom collection views.
