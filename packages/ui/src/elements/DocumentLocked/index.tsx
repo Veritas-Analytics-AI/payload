@@ -3,9 +3,11 @@ import type { ClientUser } from 'payload'
 
 import React, { useEffect } from 'react'
 
+import { useConfig } from '../../providers/Config/index.js'
 import { useRouteCache } from '../../providers/RouteCache/index.js'
 import { useRouteTransition } from '../../providers/RouteTransition/index.js'
 import { useTranslation } from '../../providers/Translation/index.js'
+import { formatDate } from '../../utilities/formatDocTitle/formatDateTitle.js'
 import { isClientUserObject } from '../../utilities/isClientUserObject.js'
 import { Button } from '../Button/index.js'
 import { Modal, useModal } from '../Modal/index.js'
@@ -14,20 +16,6 @@ import './index.scss'
 const modalSlug = 'document-locked'
 
 const baseClass = 'document-locked'
-
-const formatDate = (date) => {
-  if (!date) {
-    return ''
-  }
-  return new Intl.DateTimeFormat('en-US', {
-    day: 'numeric',
-    hour: 'numeric',
-    hour12: true,
-    minute: 'numeric',
-    month: 'short',
-    year: 'numeric',
-  }).format(new Date(date))
-}
 
 export const DocumentLocked: React.FC<{
   handleGoBack: () => void
@@ -38,7 +26,12 @@ export const DocumentLocked: React.FC<{
   user?: ClientUser | number | string
 }> = ({ handleGoBack, isActive, onReadOnly, onTakeOver, updatedAt, user }) => {
   const { closeModal, openModal } = useModal()
-  const { t } = useTranslation()
+  const { i18n, t } = useTranslation()
+  const {
+    config: {
+      admin: { dateFormat },
+    },
+  } = useConfig()
   const { clearRouteCache } = useRouteCache()
   const { startRouteTransition } = useRouteTransition()
 
@@ -70,7 +63,10 @@ export const DocumentLocked: React.FC<{
             {t('general:currentlyEditing')}
           </p>
           <p>
-            {t('general:editedSince')} <strong>{formatDate(updatedAt)}</strong>
+            {t('general:editedSince')}{' '}
+            <strong>
+              {updatedAt ? formatDate({ date: updatedAt, i18n, pattern: dateFormat }) : ''}
+            </strong>
           </p>
         </div>
         <div className={`${baseClass}__controls`}>
