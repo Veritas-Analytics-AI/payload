@@ -12,11 +12,15 @@ import type {
   SanitizedPermissions,
 } from '../auth/types.js'
 
-import { deepCopyObject } from './deepCopyObject.js'
+import { deepCopyObjectComplex } from './deepCopyObject.js'
 
 // A period cannot occur in a schema field name. Retain this false value through
 // sanitization, then remove it after cleanup so a repeated block keeps `fields: {}`.
 const recursiveBlockBoundaryKey = '\u0000payload.recursive-block-boundary'
+
+// Occurrences of a block can share one permissions object (populateFieldPermissions).
+// Sanitizing mutates it and is not idempotent, so each object is sanitized once.
+const sanitizedBlockPermissions = new WeakMap<object, boolean>()
 
 export const markRecursiveBlockBoundary = ({
   fields,
@@ -65,6 +69,14 @@ function checkAndSanitizePermissions(
   if ('blocks' in data && data.blocks) {
     for (const blockSlug in data.blocks) {
       if (typeof data.blocks[blockSlug] === 'object') {
+        const sanitized = sanitizedBlockPermissions.get(data.blocks[blockSlug])
+        if (sanitized !== undefined) {
+          if (!sanitized) {
+            blocksPermissions = false
+          }
+          continue
+        }
+        let blockPermissionsTrue = true
         for (const key in data.blocks[blockSlug]) {
           /**
            * Check fields in nested blocks
@@ -81,7 +93,7 @@ function checkAndSanitizePermissions(
               }
 
               if (!checkAndSanitizeFieldsPermssions(data.blocks[blockSlug].fields)) {
-                blocksPermissions = false
+                blockPermissionsTrue = false
               } else {
                 ;(data.blocks[blockSlug].fields as unknown as SanitizedFieldsPermissions) = true
               }
@@ -104,9 +116,9 @@ function checkAndSanitizePermissions(
                   'where' in data.blocks[blockSlug][key]
                 ) {
                   // otherwise do nothing so we can keep the where clause
-                  blocksPermissions = false
+                  blockPermissionsTrue = false
                 } else {
-                  blocksPermissions = false
+                  blockPermissionsTrue = false
                   data.blocks[blockSlug][key] = false
                   delete data.blocks[blockSlug][key]
                   continue
@@ -116,6 +128,10 @@ function checkAndSanitizePermissions(
               }
             }
           }
+        }
+        sanitizedBlockPermissions.set(data.blocks[blockSlug], blockPermissionsTrue)
+        if (!blockPermissionsTrue) {
+          blocksPermissions = false
         }
       } else if (data.blocks[blockSlug] !== true) {
         // If any value is not true, return false
@@ -191,12 +207,18 @@ function isPermissionObject(data: unknown): boolean {
  * Recursively remove empty objects from an object.
  */
 function cleanEmptyObjects({
+  cleaned,
   obj,
   recursiveBlockBoundaries,
 }: {
+  cleaned: WeakSet<object>
   obj: any
   recursiveBlockBoundaries: Record<string, unknown>[]
 }): Record<string, unknown> {
+  if (cleaned.has(obj)) {
+    return obj
+  }
+  cleaned.add(obj)
   if (Object.hasOwn(obj, recursiveBlockBoundaryKey)) {
     recursiveBlockBoundaries.push(obj)
   }
@@ -204,7 +226,7 @@ function cleanEmptyObjects({
   Object.keys(obj).forEach((key) => {
     if (typeof obj[key] === 'object' && obj[key] !== null) {
       // Recursive call
-      cleanEmptyObjects({ obj: obj[key], recursiveBlockBoundaries })
+      cleanEmptyObjects({ cleaned, obj: obj[key], recursiveBlockBoundaries })
       if (Object.keys(obj[key]).length === 0) {
         // Delete the key if the object is empty
         delete obj[key]
@@ -249,8 +271,8 @@ export function recursivelySanitizeGlobals(obj: Permissions['globals']): void {
 export function sanitizePermissions(
   permissions: MarkOptional<Permissions, 'canAccessAdmin'>,
 ): SanitizedPermissions {
-  // Each occurrence must be sanitized independently, including shared block references.
-  const data = deepCopyObject(permissions)
+  // Copies a shared block permissions object once, so it stays shared and is sanitized once.
+  const data = deepCopyObjectComplex(permissions)
 
   if (data.canAccessAdmin === false) {
     delete data.canAccessAdmin
@@ -266,7 +288,7 @@ export function sanitizePermissions(
 
   // Run clean up of empty objects at the end
   const recursiveBlockBoundaries: Record<string, unknown>[] = []
-  cleanEmptyObjects({ obj: data, recursiveBlockBoundaries })
+  cleanEmptyObjects({ cleaned: new WeakSet(), obj: data, recursiveBlockBoundaries })
   for (const fields of recursiveBlockBoundaries) {
     delete fields[recursiveBlockBoundaryKey]
   }
