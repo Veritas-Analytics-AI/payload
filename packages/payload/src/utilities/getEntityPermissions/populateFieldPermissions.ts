@@ -10,12 +10,51 @@ import type {
 import type { DefaultDocumentIDType } from '../../index.js'
 import type { AllOperations, JsonObject, PayloadRequest } from '../../types/index.js'
 
-import { type Field, tabHasName } from '../../fields/config/types.js'
-import { deepCopyObject } from '../deepCopyObject.js'
+import { type Block, type Field, tabHasName } from '../../fields/config/types.js'
 import { markRecursiveBlockBoundary } from '../sanitizePermissions.js'
 
 const isThenable = (value: unknown): value is Promise<unknown> =>
   value != null && typeof (value as { then?: unknown }).then === 'function'
+
+const blocksContainingThemselves = new WeakMap<Block, boolean>()
+
+/**
+ * Whether a block can contain itself, directly or through other blocks. A block that cannot
+ * has no recursive-block boundary that depends on its ancestors.
+ */
+const canContainItself = (block: Block, blocks: Record<string, Block>): boolean => {
+  let result = blocksContainingThemselves.get(block)
+  if (result === undefined) {
+    result = false
+    const visited = new Set<Block>()
+    const pending: Field[][] = [block.fields]
+    while (!result && pending.length > 0) {
+      for (const field of pending.pop()!) {
+        if ('fields' in field && field.fields) {
+          pending.push(field.fields)
+        }
+        if (field.type === 'tabs') {
+          for (const tab of field.tabs) {
+            pending.push(tab.fields)
+          }
+        }
+        if (field.type === 'blocks') {
+          for (const _child of field.blockReferences ?? field.blocks) {
+            const child = typeof _child === 'string' ? blocks[_child] : _child
+            if (child === block) {
+              result = true
+            } else if (child && !visited.has(child)) {
+              visited.add(child)
+              pending.push(child.fields)
+            }
+          }
+        }
+      }
+    }
+    blocksContainingThemselves.set(block, result)
+  }
+  return result
+}
 
 /**
  * Helper to set a permission value that might be a promise.
@@ -222,21 +261,23 @@ export const populateFieldPermissions = ({
             continue
           }
 
-          // Nested occurrences depend on the active ancestor path. At the root,
-          // identical inherited permissions have the same finite subtree.
+          // Nested occurrences of a block that can contain itself depend on the active
+          // ancestor path. Otherwise identical inherited permissions have the same subtree.
+          const reusable = activeBlocks.size === 0 || !canContainItself(block, req.payload.blocks)
           const inherited = operations.map(
             (operation) =>
               (blockPermission[operation as keyof BlockPermissions] as Permission | undefined)
                 ?.permission,
           )
-          const cacheKey = inherited.some(isThenable)
-            ? undefined
-            : operations.map((operation, index) => `${operation}:${inherited[index]}`).join('|')
+          const cacheKey =
+            !reusable || inherited.some(isThenable)
+              ? undefined
+              : operations.map((operation, index) => `${operation}:${inherited[index]}`).join('|')
           const cached =
             cacheKey === undefined ? undefined : blockPermissionCache.get(block)?.get(cacheKey)
-          if (activeBlocks.size === 0 && cached) {
-            // Sanitization mutates permissions, so occurrences cannot share an object.
-            blocksPermissions[block.slug] = deepCopyObject(cached)
+          if (cached) {
+            // Occurrences share the object: sanitizePermissions copies and sanitizes it once.
+            blocksPermissions[block.slug] = cached
             continue
           }
 
@@ -258,12 +299,8 @@ export const populateFieldPermissions = ({
           } finally {
             activeBlocks.delete(block)
           }
-          // Do not clone trees whose access results are still resolving.
-          if (
-            activeBlocks.size === 0 &&
-            cacheKey !== undefined &&
-            promises.length === pendingPromises
-          ) {
+          // Do not share trees whose access results are still resolving.
+          if (cacheKey !== undefined && promises.length === pendingPromises) {
             let byAccess = blockPermissionCache.get(block)
             if (!byAccess) {
               byAccess = new Map()
