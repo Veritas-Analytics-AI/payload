@@ -1,0 +1,108 @@
+name: ecrf release
+
+# Builds the packages that ecrf installs from this branch and attaches their tarballs to a release.
+# Runs when a tag named <payload version>-ecrf.<n> is pushed. Upstream's own workflows are removed
+# from this branch, so that nothing else runs in the fork.
+
+on:
+  push:
+    tags:
+      - '*-ecrf.*'
+
+permissions:
+  contents: read
+
+env:
+  # The packages this branch changes
+  PACKAGES: payload @payloadcms/drizzle @payloadcms/next @payloadcms/ui
+  TURBO_TELEMETRY_DISABLED: 1
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+
+      - uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320 # v5.0.0
+        with:
+          run_install: false
+
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version-file: .tool-versions
+
+      - name: Read the packages' version
+        run: |
+          VERSION=$(node -p "require('./packages/payload/package.json').version")
+          echo "VERSION=$VERSION" >> "$GITHUB_ENV"
+          # pnpm installs each package with its dependencies; turbo builds those as the package's ^build
+          echo "INSTALL_FILTERS=$(printf -- '--filter %s... ' $PACKAGES)" >> "$GITHUB_ENV"
+          echo "BUILD_FILTERS=$(printf -- '--filter %s ' $PACKAGES)" >> "$GITHUB_ENV"
+          case "$GITHUB_REF_NAME" in
+            "$VERSION-ecrf."*) ;;
+            *)
+              echo "::error::The tag $GITHUB_REF_NAME is not named $VERSION-ecrf.<n>."
+              exit 1
+              ;;
+          esac
+
+      - name: Build this branch's packages
+        run: |
+          pnpm install --frozen-lockfile --ignore-scripts $INSTALL_FILTERS --filter payload-monorepo
+          pnpm turbo build $BUILD_FILTERS
+          for package in $PACKAGES; do
+            pnpm --filter "$package" pack --pack-destination "$RUNNER_TEMP/fork"
+          done
+
+      - name: Build upstream's tag the same way
+        run: |
+          git clone --depth 1 --branch "v$VERSION" https://github.com/payloadcms/payload.git "$RUNNER_TEMP/upstream-source"
+          cd "$RUNNER_TEMP/upstream-source"
+          pnpm install --frozen-lockfile --ignore-scripts $INSTALL_FILTERS --filter payload-monorepo
+          pnpm turbo build $BUILD_FILTERS
+          for package in $PACKAGES; do
+            pnpm --filter "$package" pack --pack-destination "$RUNNER_TEMP/upstream"
+          done
+
+      # Proves the build: what differs between this branch's packages and npm's then comes from this
+      # branch's commits alone.
+      - name: Check that upstream's build is the packages npm ships
+        working-directory: ${{ runner.temp }}
+        run: |
+          mkdir npm
+          for package in $PACKAGES; do
+            npm pack "$package@$VERSION" --pack-destination npm
+          done
+          for build in fork upstream npm; do
+            for tarball in "$build"/*.tgz; do
+              mkdir -p "$build/files/$(basename "$tarball" .tgz)"
+              tar -xzf "$tarball" -C "$build/files/$(basename "$tarball" .tgz)"
+            done
+          done
+          diff -r npm/files upstream/files
+
+      - name: Release the tarballs
+        working-directory: ${{ runner.temp }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          {
+            echo "\`${PACKAGES// /\`, \`}\` $VERSION, built from $GITHUB_SHA."
+            echo
+            echo "Upstream's \`v$VERSION\`, built the same way in this run, gave the files npm ships. This build differs from them in:"
+            echo
+            echo '```'
+            diff -rq npm/files fork/files | sed -E 's#^Files npm/files/([^/]+)/package/(.*) and .* differ$#\1: \2#' || true
+            echo '```'
+            echo
+            echo 'sha512 of each tarball:'
+            echo
+            for tarball in fork/*.tgz; do
+              echo "- \`$(basename "$tarball")\`: \`$(openssl dgst -sha512 -binary "$tarball" | base64 -w 0)\`"
+            done
+          } > notes.md
+          gh release create "$GITHUB_REF_NAME" fork/*.tgz \
+            --repo "$GITHUB_REPOSITORY" --verify-tag --title "$GITHUB_REF_NAME" --notes-file notes.md
