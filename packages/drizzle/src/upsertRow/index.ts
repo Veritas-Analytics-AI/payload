@@ -226,8 +226,15 @@ export const upsertRow = async <T extends Record<string, unknown> | TypeWithID>(
       // Check if we only have relationship operations and no main row data to update
       // Exclude timestamp-only updates when we only have relationship operations
       const rowKeys = Object.keys(rowToInsert.row)
+      // A save whose fields live in other tables than the main row, as localized fields
+      // and the rows of arrays and blocks do, still changes the document: its updatedAt moves.
+      const hasOtherTableData =
+        Object.keys(rowToInsert.locales).length > 0 ||
+        Object.keys(rowToInsert.arrays).length > 0 ||
+        Object.keys(rowToInsert.blocks).length > 0
       const hasMainRowData =
-        rowKeys.length > 0 && !rowKeys.every((key) => key === 'updatedAt' || key === 'createdAt')
+        rowKeys.length > 0 &&
+        (hasOtherTableData || !rowKeys.every((key) => key === 'updatedAt' || key === 'createdAt'))
 
       if (hasMainRowData) {
         if (id) {
