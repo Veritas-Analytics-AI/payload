@@ -61,7 +61,7 @@ export const RestoreButton: React.FC<Props> = (props) => {
   const { startRouteTransition } = useRouteTransition()
   const { openModal } = useModal()
 
-  const modalSlug = `restore-${id}`
+  const modalSlug = `restore-${collectionSlug}-${id}`
 
   const [restoreAsPublished, setRestoreAsPublished] = useState(false)
 

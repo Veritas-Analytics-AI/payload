@@ -59,8 +59,8 @@ export const DuplicateDocument: React.FC<Props> = ({
 
   const { i18n, t } = useTranslation()
 
-  const modalSlug = `duplicate-${id}`
-  const drawerSlug = `duplicate-locales-${id}`
+  const modalSlug = `duplicate-${slug}-${id}`
+  const drawerSlug = `duplicate-locales-${slug}-${id}`
 
   const isDuplicateByLocaleEnabled = useMemo(() => {
     if (selectLocales && collectionConfig) {
