@@ -57,7 +57,7 @@ export const PermanentlyDeleteButton: React.FC<Props> = (props) => {
   const { startRouteTransition } = useRouteTransition()
   const { openModal } = useModal()
 
-  const modalSlug = `perma-delete-${id}`
+  const modalSlug = `perma-delete-${collectionSlug}-${id}`
 
   const addDefaultError = useCallback(() => {
     toast.error(t('error:deletingTitle', { title }))

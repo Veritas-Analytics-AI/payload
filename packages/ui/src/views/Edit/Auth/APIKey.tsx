@@ -45,7 +45,7 @@ export const APIKey: React.FC<{ readonly readOnly?: boolean; readonly reveal?: b
   const { config, getEntityConfig } = useConfig()
   const { id, collectionSlug, setData, setLastUpdateTime } = useDocumentInfo()
   const { code: locale } = useLocale()
-  const revokeModalSlug = `revoke-api-key-${id}`
+  const revokeModalSlug = `revoke-api-key-${collectionSlug}-${id}`
 
   const hasAPIKey = useFormFields(([fields]) => (fields && fields.hasAPIKey) || null)
   const dispatchFields = useFormFields(([, dispatchFields]) => dispatchFields)

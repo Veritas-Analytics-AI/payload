@@ -65,7 +65,7 @@ export const DeleteDocument: React.FC<Props> = (props) => {
   const { startRouteTransition } = useRouteTransition()
   const { openModal } = useModal()
 
-  const modalSlug = `delete-${id}`
+  const modalSlug = `delete-${collectionSlug}-${id}`
 
   const [deletePermanently, setDeletePermanently] = useState(false)
 
