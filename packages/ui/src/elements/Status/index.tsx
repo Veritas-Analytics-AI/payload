@@ -42,7 +42,7 @@ export const Status: React.FC = () => {
   const { code: locale } = useLocale()
   const { i18n, t } = useTranslation()
 
-  const revertModalSlug = `confirm-revert-${id}`
+  const revertModalSlug = `confirm-revert-${collectionSlug}-${id}`
 
   let statusToRender: 'changed' | 'draft' | 'published'
 

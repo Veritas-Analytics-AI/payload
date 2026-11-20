@@ -49,7 +49,7 @@ export function PublishButton({
   const { code: localeCode } = useLocale()
   const { isModalOpen, toggleModal } = useModal()
 
-  const drawerSlug = `schedule-publish-${id}`
+  const drawerSlug = `schedule-publish-${collectionSlug}-${id}`
 
   const {
     localization,

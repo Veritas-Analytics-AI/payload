@@ -41,7 +41,7 @@ export function UnpublishButton({
   const { code: localeCode, label: localeLabel } = useLocale()
   const [unpublishAll, setUnpublishAll] = useState(false)
   const [hasLocalizedFields, setHasLocalizedFields] = useState(false)
-  const unPublishModalSlug = `confirm-un-publish-${id}`
+  const unPublishModalSlug = `confirm-un-publish-${collectionSlug}-${id}`
 
   const {
     routes: { api },

@@ -22,11 +22,11 @@ export type GenerateConfirmationProps = APIKeyGenerationModalProps
 export function APIKeyGenerationModal(props: APIKeyGenerationModalProps) {
   const { id, highlightField, icon, setKey, willInvalidateExistingKey = true } = props
 
-  const { id: documentID } = useDocumentInfo()
+  const { id: documentID, collectionSlug } = useDocumentInfo()
   const { toggleModal } = useModal()
   const { t } = useTranslation()
 
-  const modalSlug = `generate-confirmation-${documentID}`
+  const modalSlug = `generate-confirmation-${collectionSlug}-${documentID}`
 
   const handleGenerate = useCallback(async () => {
     if ((await setKey()) === false) {
