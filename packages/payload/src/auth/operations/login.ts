@@ -69,43 +69,22 @@ export const checkLoginPermission = <TSlug extends AuthCollectionSlug>({
   }
 }
 
-export const loginOperation = async <TSlug extends AuthCollectionSlug>(
-  incomingArgs: Arguments<TSlug>,
-): Promise<LoginResult<TSlug>> => {
-  let args = incomingArgs
+type AuthenticateWithPasswordArgs<TSlug extends AuthCollectionSlug> = {
+  collection: Collection
+  data: AuthOperationsFromCollectionSlug<TSlug>['login']
+  req: PayloadRequest
+}
 
-  if (args.collection.config.auth.disableLocalStrategy) {
-    throw new Forbidden(args.req.t)
-  }
-
-  // /////////////////////////////////////
-  // beforeOperation - Collection
-  // /////////////////////////////////////
-
-  args = await buildBeforeOperation({
-    args,
-    collection: args.collection.config,
-    operation: 'login',
-    overrideAccess: args.overrideAccess!,
-  })
-
-  const {
-    collection: { config: collectionConfig },
-    data,
-    depth,
-    overrideAccess = false,
-    req,
-    req: {
-      payload,
-      payload: { secret },
-    },
-    showHiddenFields,
-  } = args
-
-  // /////////////////////////////////////
-  // Login
-  // /////////////////////////////////////
-
+/**
+ * Finds the user that the email or username names and checks their password, as login does.
+ * A wrong password counts towards `maxLoginAttempts`. No session starts: `loginUser` starts one.
+ */
+export const authenticateWithPassword = async <TSlug extends AuthCollectionSlug>({
+  collection: { config: collectionConfig },
+  data,
+  req,
+  req: { payload },
+}: AuthenticateWithPasswordArgs<TSlug>): Promise<TypedUser> => {
   const { email: unsanitizedEmail, password } = data
   const loginWithUsername = collectionConfig.auth.loginWithUsername
 
@@ -214,9 +193,6 @@ export const loginOperation = async <TSlug extends AuthCollectionSlug>(
     user,
   })
 
-  user.collection = collectionConfig.slug
-  user._strategy = 'local-jwt'
-
   const authenticatedHash = user.hash
   const authenticatedSalt = user.salt
   const authResult = await authenticateLocalStrategy({
@@ -226,10 +202,8 @@ export const loginOperation = async <TSlug extends AuthCollectionSlug>(
   })
   user = sanitizeInternalFields(user)
 
-  const maxLoginAttemptsEnabled = args.collection.config.auth.maxLoginAttempts > 0
-
   if (!authResult) {
-    if (maxLoginAttemptsEnabled) {
+    if (collectionConfig.auth.maxLoginAttempts > 0) {
       await incrementLoginAttempts({
         collection: collectionConfig,
         payload: req.payload,
@@ -247,15 +221,87 @@ export const loginOperation = async <TSlug extends AuthCollectionSlug>(
     throw new AuthenticationError(req.t)
   }
 
+  if (
+    authResult.shouldUpdatePasswordHash &&
+    typeof authenticatedHash === 'string' &&
+    typeof authenticatedSalt === 'string'
+  ) {
+    try {
+      const { hash, salt } = await generatePasswordSaltHash({
+        collection: collectionConfig,
+        isPasswordAuthenticated: true,
+        password,
+        req,
+      })
+
+      await payload.db.updateOne({
+        collection: collectionConfig.slug,
+        data: { hash, salt },
+        req,
+        select: { id: true },
+        where: {
+          id: { equals: user.id },
+          hash: { equals: authenticatedHash },
+          salt: { equals: authenticatedSalt },
+        },
+      })
+    } catch (err) {
+      // Rehashing is opportunistic and is retried on the next login, so a failure here
+      // must not reject an otherwise valid login
+      payload.logger.error({ err, msg: 'Failed to update the stored password hash' })
+    }
+  }
+
+  return user
+}
+
+type LoginUserArgs = {
+  collection: Collection
+  req: PayloadRequest
+  user: TypedUser
+}
+
+export type LoginUserResult = {
+  exp: number
+  /** The ID of the session the token belongs to, when the collection uses sessions */
+  sid?: string
+  token: string
+  user: TypedUser
+}
+
+/**
+ * Logs in a user who is already authenticated, by `authenticateWithPassword` or any other way, as
+ * login does: adds a session, resets the login attempts, signs a token and runs the `beforeLogin`
+ * and `afterLogin` hooks. Throws if the user is locked or has not verified their email.
+ */
+export const loginUser = async ({
+  collection: { config: collectionConfig },
+  req,
+  req: {
+    payload,
+    payload: { secret },
+  },
+  user: authenticatedUser,
+}: LoginUserArgs): Promise<LoginUserResult> => {
+  let user = authenticatedUser
+
   if (collectionConfig.auth.verify && user._verified === false) {
     throw new UnverifiedEmail({ t: req.t })
   }
 
-  // Authentication successful - start transaction for remaining operations
-  const shouldCommit = await initTransaction(args.req)
+  user.collection = collectionConfig.slug
+  user._strategy = 'local-jwt'
+  // addSessionToUser writes the whole user, which must not put back a hash and salt read before a
+  // rehash or a password change
+  delete user.hash
+  delete user.salt
+
+  const shouldCommit = await initTransaction(req)
   let sid: string | undefined
 
   try {
+    const maxLoginAttemptsEnabled = collectionConfig.auth.maxLoginAttempts > 0
+
     /*
      * Correct password accepted - re‑check that the account didn't
      * get locked by parallel bad attempts in the meantime.
@@ -282,7 +328,7 @@ export const loginOperation = async <TSlug extends AuthCollectionSlug>(
 
     const fieldsToSignArgs: Parameters<typeof getFieldsToSign>[0] = {
       collectionConfig,
-      email: sanitizedEmail!,
+      email: user.email!,
       user,
     }
 
@@ -296,37 +342,6 @@ export const loginOperation = async <TSlug extends AuthCollectionSlug>(
 
     if (sid) {
       fieldsToSignArgs.sid = sid
-    }
-
-    if (
-      authResult.shouldUpdatePasswordHash &&
-      typeof authenticatedHash === 'string' &&
-      typeof authenticatedSalt === 'string'
-    ) {
-      try {
-        const { hash, salt } = await generatePasswordSaltHash({
-          collection: collectionConfig,
-          isPasswordAuthenticated: true,
-          password,
-          req,
-        })
-
-        await payload.db.updateOne({
-          collection: collectionConfig.slug,
-          data: { hash, salt },
-          req,
-          select: { id: true },
-          where: {
-            id: { equals: user.id },
-            hash: { equals: authenticatedHash },
-            salt: { equals: authenticatedSalt },
-          },
-        })
-      } catch (err) {
-        // Rehashing is opportunistic and is retried on the next login, so a failure here
-        // must not reject an otherwise valid login or discard the session already created
-        payload.logger.error({ err, msg: 'Failed to update the stored password hash' })
-      }
     }
 
     const fieldsToSign = getFieldsToSign(fieldsToSignArgs)
@@ -348,9 +363,9 @@ export const loginOperation = async <TSlug extends AuthCollectionSlug>(
       for (const hook of collectionConfig.hooks.beforeLogin) {
         user =
           (await hook({
-            collection: args.collection?.config,
-            context: args.req.context,
-            req: args.req,
+            collection: collectionConfig,
+            context: req.context,
+            req,
             user,
           })) || user
       }
@@ -372,14 +387,78 @@ export const loginOperation = async <TSlug extends AuthCollectionSlug>(
       for (const hook of collectionConfig.hooks.afterLogin) {
         user =
           (await hook({
-            collection: args.collection?.config,
-            context: args.req.context,
-            req: args.req,
+            collection: collectionConfig,
+            context: req.context,
+            req,
             token,
             user,
           })) || user
       }
     }
+
+    if (shouldCommit) {
+      await commitTransaction(req)
+    }
+
+    return { exp, sid, token, user }
+  } catch (error: unknown) {
+    if (sid) {
+      await revokeSession({
+        collectionConfig,
+        payload,
+        req,
+        sid,
+        user,
+      })
+    }
+    await killTransaction(req)
+    throw error
+  }
+}
+
+export const loginOperation = async <TSlug extends AuthCollectionSlug>(
+  incomingArgs: Arguments<TSlug>,
+): Promise<LoginResult<TSlug>> => {
+  let args = incomingArgs
+
+  if (args.collection.config.auth.disableLocalStrategy) {
+    throw new Forbidden(args.req.t)
+  }
+
+  // /////////////////////////////////////
+  // beforeOperation - Collection
+  // /////////////////////////////////////
+
+  args = await buildBeforeOperation({
+    args,
+    collection: args.collection.config,
+    operation: 'login',
+    overrideAccess: args.overrideAccess!,
+  })
+
+  const {
+    collection,
+    collection: { config: collectionConfig },
+    data,
+    depth,
+    overrideAccess = false,
+    req,
+    req: { payload },
+    showHiddenFields,
+  } = args
+
+  // /////////////////////////////////////
+  // Login
+  // /////////////////////////////////////
+
+  const authenticatedUser = await authenticateWithPassword({ collection, data, req })
+
+  // Authentication successful - start transaction for remaining operations
+  const shouldCommit = await initTransaction(args.req)
+  let login: LoginUserResult | undefined
+
+  try {
+    login = await loginUser({ collection, req, user: authenticatedUser })
 
     // /////////////////////////////////////
     // afterRead - Fields
@@ -391,12 +470,12 @@ export const loginOperation = async <TSlug extends AuthCollectionSlug>(
       overrideAccess,
       req,
       showHiddenFields: showHiddenFields!,
-      user,
+      user: login.user,
     })
 
     let result: LoginResult<TSlug> = {
-      exp,
-      token,
+      exp: login.exp,
+      token: login.token,
       user: userWithReadAccess,
     }
 
@@ -422,13 +501,14 @@ export const loginOperation = async <TSlug extends AuthCollectionSlug>(
 
     return result
   } catch (error: unknown) {
-    if (sid) {
+    // loginUser revokes its session when it throws itself
+    if (login?.sid) {
       await revokeSession({
         collectionConfig,
         payload,
         req,
-        sid,
-        user,
+        sid: login.sid,
+        user: login.user,
       })
     }
     await killTransaction(args.req)
