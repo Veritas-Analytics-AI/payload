@@ -93,3 +93,57 @@ export const revokeSession = async ({
     })
   }
 }
+
+/**
+ * Removes all sessions except the one with the ID `sid`, which goes too once it has expired
+ */
+export const removeOtherSessions = (sessions: UserSession[], sid?: string) =>
+  removeExpiredSessions(sessions).filter(({ id }) => id === sid)
+
+/**
+ * Revokes all of a user's sessions, except the one with the ID `exceptSid` when given
+ */
+export const revokeSessions = async ({
+  collectionConfig,
+  exceptSid,
+  payload,
+  req,
+  userID,
+}: {
+  collectionConfig: SanitizedCollectionConfig
+  exceptSid?: string
+  payload: Payload
+  req: PayloadRequest
+  userID: TypeWithID['id']
+}): Promise<void> => {
+  if (!collectionConfig.auth.useSessions) {
+    return
+  }
+
+  const user = await payload.db.findOne<
+    { sessions?: UserSession[]; updatedAt?: null | string } & TypeWithID
+  >({
+    collection: collectionConfig.slug,
+    req,
+    where: { id: { equals: userID } },
+  })
+
+  if (!user) {
+    return
+  }
+
+  user.sessions = removeOtherSessions(user.sessions ?? [], exceptSid)
+
+  // Prevent updatedAt from being updated when only removing sessions
+  user.updatedAt = null
+
+  // The whole user, as logout writes it: a write that holds an array clears the arrays it leaves out
+  // in the SQL adapters
+  await payload.db.updateOne({
+    id: userID,
+    collection: collectionConfig.slug,
+    data: user,
+    req,
+    returning: false,
+  })
+}

@@ -11,8 +11,15 @@ import type {
 import crypto from 'crypto'
 import { jwtDecode } from 'jwt-decode'
 import path from 'path'
-import { createLocalReq, Forbidden, getFieldsToSign, traverseFields } from 'payload'
-import { email as emailValidation } from 'payload/shared'
+import {
+  authenticateWithPassword,
+  createLocalReq,
+  Forbidden,
+  getFieldsToSign,
+  loginUser,
+  traverseFields,
+} from 'payload'
+import { email as emailValidation, revokeSessions } from 'payload/shared'
 import { fileURLToPath } from 'url'
 import { v4 as uuid } from 'uuid'
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vitest } from 'vitest'
@@ -2884,6 +2891,96 @@ describe('Auth', () => {
           await payload.delete({ id: user.id, collection: slug })
         }
       })
+
+      it('should check a password without logging in', async () => {
+        const created = await createLoginAttemptUser({
+          email: `password-check-${Date.now()}@example.com`,
+        })
+        const req = await createLocalReq({}, payload)
+
+        const user = await authenticateWithPassword({
+          collection: payload.collections[slug],
+          data: { email: created.email, password },
+          req,
+        })
+
+        const stored = await payload.db.findOne<User>({
+          collection: slug,
+          where: { id: { equals: created.id } },
+        })
+        expect(user.id).toStrictEqual(created.id)
+        expect(req.user).toBeFalsy()
+        expect(stored?.sessions ?? []).toHaveLength(0)
+      })
+
+      it('should count the wrong passwords it checks towards the lock', async () => {
+        const created = await createLoginAttemptUser({
+          email: `password-check-wrong-${Date.now()}@example.com`,
+        })
+        const checkPassword = async (passwordToCheck: string) =>
+          authenticateWithPassword({
+            collection: payload.collections[slug],
+            data: { email: created.email, password: passwordToCheck },
+            req: await createLocalReq({}, payload),
+          })
+
+        await expect(checkPassword('wrong-password')).rejects.toThrow(
+          'The email or password provided is incorrect.',
+        )
+        await expect(checkPassword('wrong-password')).rejects.toThrow(
+          'The email or password provided is incorrect.',
+        )
+        await expect(checkPassword(password)).rejects.toThrow(
+          'This user is locked due to having too many failed login attempts.',
+        )
+      })
+
+      it('should log in a user authenticated without a password', async () => {
+        const created = await createLoginAttemptUser({
+          email: `login-user-${Date.now()}@example.com`,
+        })
+        const user = await payload.db.findOne<User>({
+          collection: slug,
+          where: { id: { equals: created.id } },
+        })
+
+        const { sid, token } = await loginUser({
+          collection: payload.collections[slug],
+          req: await createLocalReq({}, payload),
+          user: user!,
+        })
+
+        const { user: authenticated } = await payload.auth({
+          headers: new Headers({ Authorization: `JWT ${token}` }),
+        })
+        expect(authenticated?.id).toStrictEqual(created.id)
+        expect(jwtDecode<{ sid: string }>(token).sid).toStrictEqual(sid)
+      })
+
+      it('should not log in a locked user authenticated without a password', async () => {
+        const created = await createLoginAttemptUser({
+          email: `login-user-locked-${Date.now()}@example.com`,
+        })
+        const user = await payload.db.findOne<User>({
+          collection: slug,
+          where: { id: { equals: created.id } },
+        })
+        await setLoginAttemptLock({ id: created.id })
+
+        await expect(
+          loginUser({
+            collection: payload.collections[slug],
+            req: await createLocalReq({}, payload),
+            user: user!,
+          }),
+        ).rejects.toThrow('This user is locked due to having too many failed login attempts.')
+
+        const stored = await payload.db.findOne<User>({
+          collection: slug,
+          where: { id: { equals: created.id } },
+        })
+        expect(stored?.sessions ?? []).toHaveLength(0)
+      })
     })
   })
 
@@ -3306,6 +3403,48 @@ describe('Auth', () => {
 
       // updatedAt should not have changed
       expect(userAfterRefresh?.updatedAt).toEqual(updatedAtAfterLogin)
+    })
+
+    it('should revoke all sessions but one', async () => {
+      const testUser = await payload.create({
+        collection: slug,
+        data: {
+          email: `test.revoke.${Date.now()}@example.com`,
+          loginMetadata: [{ info: 'kept' }],
+          password: 'test123',
+        },
+      })
+      const login = () =>
+        payload.login({
+          collection: slug,
+          data: { email: testUser.email, password: 'test123' },
+        })
+      const findUser = () =>
+        payload.db.findOne<User>({
+          collection: slug,
+          where: { id: { equals: testUser.id } },
+        })
+      const keptSid = jwtDecode<{ sid: string }>(String((await login()).token)).sid
+      await login()
+      await login()
+      const userAfterLogin = await findUser()
+      const args = {
+        collectionConfig: payload.collections[slug].config,
+        payload,
+        req: await createLocalReq({}, payload),
+        userID: testUser.id,
+      }
+
+      await revokeSessions({ ...args, exceptSid: keptSid })
+      const userAfterRevokingOthers = await findUser()
+      await revokeSessions(args)
+      const userAfterRevokingAll = await findUser()
+
+      expect(userAfterLogin?.sessions).toHaveLength(3)
+      expect(userAfterRevokingOthers?.sessions?.map(({ id }) => id)).toStrictEqual([keptSid])
+      expect(userAfterRevokingAll?.sessions ?? []).toHaveLength(0)
+      expect(userAfterRevokingAll?.updatedAt).toEqual(userAfterLogin?.updatedAt)
+      expect(userAfterRevokingAll?.loginMetadata?.map(({ info }) => info)).toStrictEqual(['kept'])
     })
   })
 

@@ -3,6 +3,7 @@ import type { JoinQuery } from '../types/index.js'
 import { isNumber } from './isNumber.js'
 
 export type JoinParams =
+  | 'false'
   | {
       [schemaPath: string]:
         | {
@@ -19,6 +20,10 @@ export type JoinParams =
  * @param joins
  */
 export const sanitizeJoinParams = (_joins: JoinParams = {}): JoinQuery => {
+  if (_joins === 'false' || _joins === false) {
+    return false
+  }
+
   const joinQuery: Record<string, any> = {}
   const joins = _joins as Record<string, any>
 

@@ -1102,6 +1102,24 @@ describe('Joins Field', () => {
         .then((res) => res.json())
       expect(response.docs[0].name).toStrictEqual(category.name)
     })
+
+    it('should leave out every join with joins=false', async () => {
+      const categoryWithoutJoins = await restClient
+        .GET(`/categories/${category.id}?joins=false`)
+        .then((res) => res.json())
+      const { user: me } = await restClient
+        .GET('/users/me', { headers: { Authorization: `JWT ${token}` } })
+        .then((res) => res.json())
+      const { user: meWithoutJoins } = await restClient
+        .GET('/users/me?joins=false', { headers: { Authorization: `JWT ${token}` } })
+        .then((res) => res.json())
+
+      expect(categoryWithoutJoins.name).toStrictEqual(category.name)
+      expect(categoryWithoutJoins).not.toHaveProperty('relatedPosts')
+      expect(me).toHaveProperty('posts')
+      expect(meWithoutJoins.id).toStrictEqual(me.id)
+      expect(meWithoutJoins).not.toHaveProperty('posts')
+    })
   })
 
   describe('GraphQL', () => {

@@ -24,7 +24,7 @@ import type {
 } from '../../config/types.js'
 
 import { ensureUsernameOrEmail } from '../../../auth/ensureUsernameOrEmail.js'
-import { removeExpiredSessions } from '../../../auth/sessions.js'
+import { removeOtherSessions } from '../../../auth/sessions.js'
 import { generatePasswordSaltHash } from '../../../auth/strategies/local/generatePasswordSaltHash.js'
 import { afterChange } from '../../../fields/hooks/afterChange/index.js'
 import { afterRead } from '../../../fields/hooks/afterRead/index.js'
@@ -453,13 +453,10 @@ export const updateDocument = async <
         req.user?.collection === collectionConfig.slug && String(req.user.id) === String(id)
           ? req.user._sid
           : undefined
-      const existingSessions = removeExpiredSessions(
+      dataToUpdate.sessions = removeOtherSessions(
         (docWithLocales.sessions as undefined | UserSession[]) ?? [],
+        currentSid,
       )
-
-      dataToUpdate.sessions = currentSid
-        ? existingSessions.filter((session) => session.id === currentSid)
-        : []
     }
   }
 
