@@ -257,6 +257,11 @@ export const authenticateWithPassword = async <TSlug extends AuthCollectionSlug>
 
 type LoginUserArgs = {
   collection: Collection
+  /**
+   * Leaves the user's login attempts as they are, for a sign-in that doesn't prove the password,
+   * so that it doesn't undo the lock that wrong passwords count towards.
+   */
+  keepLoginAttempts?: boolean
   req: PayloadRequest
   user: TypedUser
 }
@@ -271,11 +276,13 @@ export type LoginUserResult = {
 
 /**
  * Logs in a user who is already authenticated, by `authenticateWithPassword` or any other way, as
- * login does: adds a session, resets the login attempts, signs a token and runs the `beforeLogin`
- * and `afterLogin` hooks. Throws if the user is locked or has not verified their email.
+ * login does: adds a session, resets the login attempts unless `keepLoginAttempts`, signs a token
+ * and runs the `beforeLogin` and `afterLogin` hooks. Throws if the user is locked or has not
+ * verified their email.
  */
 export const loginUser = async ({
   collection: { config: collectionConfig },
+  keepLoginAttempts = false,
   req,
   req: {
     payload,
@@ -291,10 +298,6 @@ export const loginUser = async ({
 
   user.collection = collectionConfig.slug
   user._strategy = 'local-jwt'
-  // addSessionToUser writes the whole user, which must not put back a hash and salt read before a
-  // rehash or a password change
-  delete user.hash
-  delete user.salt
 
   const shouldCommit = await initTransaction(req)
   let sid: string | undefined
@@ -346,7 +349,7 @@ export const loginUser = async ({
 
     const fieldsToSign = getFieldsToSign(fieldsToSignArgs)
 
-    if (maxLoginAttemptsEnabled) {
+    if (maxLoginAttemptsEnabled && !keepLoginAttempts) {
       await resetLoginAttempts({
         collection: collectionConfig,
         doc: user,

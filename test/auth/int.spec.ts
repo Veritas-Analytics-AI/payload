@@ -13,13 +13,16 @@ import { jwtDecode } from 'jwt-decode'
 import path from 'path'
 import {
   authenticateWithPassword,
+  commitTransaction,
   createLocalReq,
   Forbidden,
   getFieldsToSign,
+  initTransaction,
   loginUser,
+  refreshOperation,
   traverseFields,
 } from 'payload'
-import { email as emailValidation, revokeSessions } from 'payload/shared'
+import { addSessionToUser, email as emailValidation, revokeSessions, wait } from 'payload/shared'
 import { fileURLToPath } from 'url'
 import { v4 as uuid } from 'uuid'
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vitest } from 'vitest'
@@ -2957,6 +2960,36 @@ describe('Auth', () => {
         expect(jwtDecode<{ sid: string }>(token).sid).toStrictEqual(sid)
       })
 
+      it('should leave the login attempts of a user logged in with keepLoginAttempts', async () => {
+        const created = await createLoginAttemptUser({
+          email: `login-user-attempts-${Date.now()}@example.com`,
+        })
+        await payload.db.updateOne({
+          id: created.id,
+          collection: slug,
+          data: { loginAttempts: 3 },
+          returning: false,
+        })
+        const user = await payload.db.findOne<User>({
+          collection: slug,
+          where: { id: { equals: created.id } },
+        })
+
+        await loginUser({
+          collection: payload.collections[slug],
+          keepLoginAttempts: true,
+          req: await createLocalReq({}, payload),
+          user: user!,
+        })
+
+        const stored = await payload.db.findOne<User>({
+          collection: slug,
+          where: { id: { equals: created.id } },
+        })
+        expect(stored?.loginAttempts).toStrictEqual(3)
+        expect(stored?.sessions).toHaveLength(1)
+      })
+
       it('should not log in a locked user authenticated without a password', async () => {
         const created = await createLoginAttemptUser({
           email: `login-user-locked-${Date.now()}@example.com`,
@@ -3445,6 +3478,91 @@ describe('Auth', () => {
       expect(userAfterRevokingAll?.sessions ?? []).toHaveLength(0)
       expect(userAfterRevokingAll?.updatedAt).toEqual(userAfterLogin?.updatedAt)
       expect(userAfterRevokingAll?.loginMetadata?.map(({ info }) => info)).toStrictEqual(['kept'])
+    })
+
+    describe('written while another write revokes them', () => {
+      let revocation: Awaited<ReturnType<typeof createLocalReq>>
+      let testUser: User
+      let token: string
+
+      const findUser = () =>
+        payload.db.findOne<User>({
+          collection: slug,
+          where: { id: { equals: testUser.id } },
+        })
+
+      // A revocation that has written but not committed, so that the write each test starts read
+      // the user before it
+      beforeEach(async () => {
+        testUser = await payload.create({
+          collection: slug,
+          data: { email: `test.concurrent.${uuid()}@example.com`, password: 'test123' },
+        })
+        token = String(
+          (
+            await payload.login({
+              collection: slug,
+              data: { email: testUser.email, password: 'test123' },
+            })
+          ).token,
+        )
+        revocation = await createLocalReq({}, payload)
+        await initTransaction(revocation)
+        await revokeSessions({
+          collectionConfig: payload.collections[slug].config,
+          payload,
+          req: revocation,
+          userID: testUser.id,
+        })
+      })
+
+      it('should not put back the revoked sessions when adding one', async () => {
+        const user = await findUser()
+        const adding = addSessionToUser({
+          collectionConfig: payload.collections[slug].config,
+          payload,
+          req: await createLocalReq({}, payload),
+          user: user!,
+        })
+        await commitTransaction(revocation)
+        const { sid } = await adding
+
+        expect((await findUser())?.sessions?.map(({ id }) => id)).toStrictEqual([sid])
+      })
+
+      it('should refuse to refresh a session revoked after the request was authenticated', async () => {
+        const { user } = await payload.auth({
+          headers: new Headers({ Authorization: `JWT ${token}` }),
+        })
+        const refused = expect(
+          refreshOperation({
+            collection: payload.collections[slug],
+            req: await createLocalReq({ user: user! }, payload),
+          }),
+        ).rejects.toBeInstanceOf(Forbidden)
+        // time to read the user before the revocation commits
+        await wait(100)
+        await commitTransaction(revocation)
+
+        await refused
+        expect((await findUser())?.sessions ?? []).toHaveLength(0)
+      })
+
+      it('should not put back the revoked sessions when updating the user', async () => {
+        const updating = payload.update({
+          id: testUser.id,
+          collection: slug,
+          data: { loginMetadata: [{ info: 'updated' }] },
+        })
+        // time to read the user before the revocation commits
+        await wait(100)
+        await commitTransaction(revocation)
+        await updating
+
+        const stored = await findUser()
+        expect(stored?.sessions ?? []).toHaveLength(0)
+        expect(stored?.loginMetadata?.map(({ info }) => info)).toStrictEqual(['updated'])
+      })
     })
   })
 
