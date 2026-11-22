@@ -76,6 +76,7 @@ export const refreshOperation = async (incomingArgs: Arguments): Promise<Result>
 
     let user = await req.payload.db.findOne<any>({
       collection: collectionConfig.slug,
+      lock: true,
       req,
       where: { id: { equals: args.req.user.id } },
     })
@@ -88,6 +89,11 @@ export const refreshOperation = async (incomingArgs: Arguments): Promise<Result>
       }
 
       const existingSession = user.sessions.find(({ id }: { id: number }) => id === sid)
+
+      // revoked since the request was authenticated
+      if (!existingSession) {
+        throw new Forbidden(args.req.t)
+      }
 
       const now = new Date()
       const tokenExpInMs = collectionConfig.auth.tokenExpiration * 1000

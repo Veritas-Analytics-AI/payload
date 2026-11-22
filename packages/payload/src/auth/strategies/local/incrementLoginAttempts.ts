@@ -2,6 +2,7 @@ import type { SanitizedCollectionConfig } from '../../../collections/config/type
 
 import { type JsonObject, type Payload, type TypedUser } from '../../../index.js'
 import { isUserLocked } from '../../isUserLocked.js'
+import { updateSessions } from '../../sessions.js'
 
 type Args = {
   collection: SanitizedCollectionConfig
@@ -114,40 +115,21 @@ export const incrementLoginAttempts = async ({
       // an additional db update here.
       // However, this request (the incorrect login attempt request) can kill the successful login attempt here.
 
-      // Fetch user sessions separately (do not do this in the updateOne select in order to preserve the returning: true db call optimization)
-      const currentUser = await payload.db.findOne<TypedUser>({
-        collection: collection.slug,
-        select: {
-          sessions: true,
-        },
-        where: {
-          id: {
-            equals: user.id,
-          },
-        },
+      // A transaction of its own, as the updates above don't use the caller's
+      user.sessions = await updateSessions({
+        collectionConfig: collection,
+        payload,
+        req: { payload },
+        update: (sessions) =>
+          sessions.filter((session) => {
+            const sessionCreatedAt = new Date(session.createdAt)
+            const twentySecondsAgo = new Date(currentTime - 20000)
+
+            // Remove sessions created within the last 20 seconds
+            return sessionCreatedAt <= twentySecondsAgo
+          }),
+        userID: user.id,
       })
-      if (currentUser?.sessions?.length) {
-        // Does not hurt also removing expired sessions
-        currentUser.sessions = currentUser.sessions.filter((session) => {
-          const sessionCreatedAt = new Date(session.createdAt)
-          const twentySecondsAgo = new Date(currentTime - 20000)
-
-          // Remove sessions created within the last 20 seconds
-          return sessionCreatedAt <= twentySecondsAgo
-        })
-
-        user.sessions = currentUser.sessions
-
-        // Ensure updatedAt date is always updated
-        user.updatedAt = new Date().toISOString()
-
-        await payload.db.updateOne({
-          id: user.id,
-          collection: collection.slug,
-          data: user,
-          returning: false,
-        })
-      }
     }
   }
 }

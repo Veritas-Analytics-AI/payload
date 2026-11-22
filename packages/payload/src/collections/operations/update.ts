@@ -352,6 +352,19 @@ export const updateOperation = async <
           docShouldCommit = await initTransaction(req)
         }
 
+        // A user's session and password writers read it locked too, so that none writes back what
+        // another changed after it read the user
+        if (collectionConfig.auth && !hasDraftsEnabled(collectionConfig)) {
+          docWithLocales =
+            (await payload.db.findOne<(typeof docs)[number]>({
+              collection: collectionConfig.slug,
+              locale: locale!,
+              lock: true,
+              req,
+              where: { id: { equals: id } },
+            })) ?? docWithLocales
+        }
+
         const documentFile = req.file ? { ...req.file } : undefined
         if (collectionConfig.upload && !overrideAccess && documentFile?.tempFilePath) {
           const extension = path.extname(documentFile.tempFilePath)
