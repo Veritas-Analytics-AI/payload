@@ -228,7 +228,8 @@ export type FindOneArgs = {
   locale?: string
   /**
    * Locks the document until `req`'s transaction ends, and reads it once locked, so that writes
-   * that read it this way take turns and none writes back what another changed. Only Postgres
+   * that read it this way take turns and none writes back what another changed. Call
+   * `initTransaction(req)` first: without a transaction the lock ends with the read. Only Postgres
    * locks it.
    */
   lock?: boolean
