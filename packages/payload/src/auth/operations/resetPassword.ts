@@ -93,6 +93,7 @@ export const resetPasswordOperation = async <TSlug extends AuthCollectionSlug>(
 
     let user = await payload.db.findOne<TypedUser>({
       collection: collectionConfig.slug,
+      lock: true,
       req,
       where,
     })

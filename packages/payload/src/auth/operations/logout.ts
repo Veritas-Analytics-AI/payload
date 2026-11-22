@@ -61,6 +61,7 @@ export const logoutOperation = async (incomingArgs: Arguments): Promise<boolean>
         sessions: { id: string }[]
       }>({
         collection: collectionConfig.slug,
+        lock: true,
         req,
         where,
       })

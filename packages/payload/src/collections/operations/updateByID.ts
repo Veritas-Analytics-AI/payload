@@ -233,6 +233,9 @@ export const updateByIDOperation = async <
     const findOneArgs: FindOneArgs = {
       collection: collectionConfig.slug,
       locale: locale!,
+      // A user's session and password writers read it locked too, so that none writes back what
+      // another changed after it read the user
+      lock: Boolean(collectionConfig.auth),
       req,
       where: fullWhere,
     }

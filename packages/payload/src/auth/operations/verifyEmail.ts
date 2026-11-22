@@ -38,6 +38,7 @@ export const verifyEmailOperation = async (args: Args): Promise<boolean> => {
 
     const user = await req.payload.db.findOne<any>({
       collection: collection.config.slug,
+      lock: true,
       req,
       where,
     })
