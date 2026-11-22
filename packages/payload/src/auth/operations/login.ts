@@ -234,7 +234,7 @@ export const authenticateWithPassword = async <TSlug extends AuthCollectionSlug>
         req,
       })
 
-      await payload.db.updateOne({
+      const rehashed = await payload.db.updateOne({
         collection: collectionConfig.slug,
         data: { hash, salt },
         req,
@@ -245,6 +245,12 @@ export const authenticateWithPassword = async <TSlug extends AuthCollectionSlug>
           salt: { equals: authenticatedSalt },
         },
       })
+
+      // the hash and salt the user is returned with are the ones the password matches
+      if (rehashed) {
+        user.hash = hash
+        user.salt = salt
+      }
     } catch (err) {
       // Rehashing is opportunistic and is retried on the next login, so a failure here
       // must not reject an otherwise valid login
@@ -461,6 +467,20 @@ export const loginOperation = async <TSlug extends AuthCollectionSlug>(
   let login: LoginUserResult | undefined
 
   try {
+    // The user stays locked until its session is added: a password changed since the check above
+    // refuses the login, and a change that comes later revokes the session.
+    const stored = await payload.db.findOne<TypedUser>({
+      collection: collectionConfig.slug,
+      lock: true,
+      req,
+      select: { hash: true, salt: true },
+      where: { id: { equals: authenticatedUser.id } },
+    })
+
+    if (stored?.hash !== authenticatedUser.hash || stored?.salt !== authenticatedUser.salt) {
+      throw new AuthenticationError(req.t)
+    }
+
     login = await loginUser({ collection, req, user: authenticatedUser })
 
     // /////////////////////////////////////

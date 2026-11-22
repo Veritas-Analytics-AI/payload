@@ -384,13 +384,16 @@ describe('Auth', () => {
         }
 
         try {
-          await payload.login({
-            collection: slug,
-            data: {
-              email: testEmail,
-              password: testPassword,
-            },
-          })
+          // the password it was checked against is no longer the user's
+          await expect(
+            payload.login({
+              collection: slug,
+              data: {
+                email: testEmail,
+                password: testPassword,
+              },
+            }),
+          ).rejects.toThrow('The email or password provided is incorrect.')
         } finally {
           payload.db.updateOne = originalUpdateOne
           collectionConfig.auth.maxLoginAttempts = maxLoginAttempts
@@ -471,13 +474,16 @@ describe('Auth', () => {
           }
 
           try {
-            await payload.login({
-              collection: slug,
-              data: {
-                email: testEmail,
-                password: testPassword,
-              },
-            })
+            // the password it was checked against is no longer the user's
+            await expect(
+              payload.login({
+                collection: slug,
+                data: {
+                  email: testEmail,
+                  password: testPassword,
+                },
+              }),
+            ).rejects.toThrow('The email or password provided is incorrect.')
           } finally {
             payload.db.updateOne = originalUpdateOne
           }
@@ -3563,6 +3569,39 @@ describe('Auth', () => {
         expect(stored?.sessions ?? []).toHaveLength(0)
         expect(stored?.loginMetadata?.map(({ info }) => info)).toStrictEqual(['updated'])
       })
+    })
+
+    it('should refuse a login checked against a password changed before its session was added', async () => {
+      const testUser = await payload.create({
+        collection: slug,
+        data: { email: `test.password-change.${uuid()}@example.com`, password: 'test123' },
+      })
+      // a password change that has written but not committed
+      const change = await createLocalReq({}, payload)
+      await initTransaction(change)
+      await payload.update({
+        id: testUser.id,
+        collection: slug,
+        data: { password: 'changed123' },
+        req: change,
+      })
+
+      const refused = expect(
+        payload.login({
+          collection: slug,
+          data: { email: testUser.email, password: 'test123' },
+        }),
+      ).rejects.toThrow('The email or password provided is incorrect.')
+      // time to check the old password before the change commits
+      await wait(100)
+      await commitTransaction(change)
+
+      await refused
+      const stored = await payload.db.findOne<User>({
+        collection: slug,
+        where: { id: { equals: testUser.id } },
+      })
+      expect(stored?.sessions ?? []).toHaveLength(0)
     })
   })
 
