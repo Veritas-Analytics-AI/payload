@@ -27,6 +27,7 @@ import {
   initPageConsoleErrorCatch,
   saveDocAndAssert,
 } from '../__helpers/e2e/helpers.js'
+import { isFormStateRequest } from '../__helpers/e2e/isFormStateRequest.js'
 import { AdminUrlUtil } from '../__helpers/shared/adminUrlUtil.js'
 import { reInitializeDB } from '../__helpers/shared/clearAndSeed/reInitializeDB.js'
 import { initPayloadE2ENoConfig } from '../__helpers/shared/initPayloadE2ENoConfig.js'
@@ -581,6 +582,63 @@ describe('Locked Documents', () => {
       })
 
       expect(unlockedDocs.docs.length).toBe(0)
+    })
+
+    test('should leave document unlocked when the form state of an edit is answered after navigating away', async () => {
+      const editURL = postsUrl.edit(postDocTwo.id)
+      await page.goto(editURL)
+
+      const answerFormState = await holdFormState(editURL)
+
+      await page.locator('#field-text').fill('hello world')
+      await page.waitForRequest((request) => isFormStateRequest({ pageURL: editURL, request }))
+
+      await page.locator('header.app-header a[href="/admin/collections/posts"]').click()
+
+      // Click the "Leave anyway" button
+      await page
+        .locator('#leave-without-saving .confirmation-modal__controls .btn--style-primary')
+        .click()
+
+      await page.waitForURL((url) => url.pathname === new URL(postsUrl.list).pathname)
+
+      await answerFormState()
+
+      await expect.poll(async () => (await findPostLocks(postDocTwo.id)).length).toBe(0)
+
+      await page.unroute(editURL)
+    })
+
+    test('should leave document unlocked when the form state of a later edit is answered after navigating away', async () => {
+      const editURL = postsUrl.edit(postDocTwo.id)
+      await page.goto(editURL)
+
+      const textInput = page.locator('#field-text')
+      await textInput.fill('hello world')
+
+      await expect.poll(async () => (await findPostLocks(postDocTwo.id)).length).toBe(1)
+
+      const answerFormState = await holdFormState(editURL)
+
+      await textInput.fill('hello again')
+      await page.waitForRequest((request) => isFormStateRequest({ pageURL: editURL, request }))
+
+      await page.locator('header.app-header a[href="/admin/collections/posts"]').click()
+
+      // Click the "Leave anyway" button
+      await page
+        .locator('#leave-without-saving .confirmation-modal__controls .btn--style-primary')
+        .click()
+
+      await page.waitForURL((url) => url.pathname === new URL(postsUrl.list).pathname)
+
+      expect(await findPostLocks(postDocTwo.id)).toHaveLength(0)
+
+      await answerFormState()
+
+      await expect.poll(async () => (await findPostLocks(postDocTwo.id)).length).toBe(0)
+
+      await page.unroute(editURL)
     })
   })
 
@@ -2217,6 +2275,50 @@ async function createPageDoc(data: Partial<PageType>): Promise<PageType> {
     collection: 'pages',
     data,
   }) as unknown as Promise<PageType>
+}
+
+/**
+ * Holds the form state requests of a document, as a slow server does, until the returned function
+ * is called. That function resolves once the server has answered.
+ *
+ * The test removes the route when it ends: removed right after the answer, the unlock that the page
+ * sends next did not reach the server in 8 of 120 runs.
+ */
+async function holdFormState(editURL: string): Promise<() => Promise<void>> {
+  let release: () => void
+  const released = new Promise<void>((resolve) => {
+    release = resolve
+  })
+
+  await page.route(editURL, async (route) => {
+    if (isFormStateRequest({ pageURL: editURL, request: route.request() })) {
+      await released
+    }
+
+    await route.continue()
+  })
+
+  return async () => {
+    const answered = page.waitForResponse((response) =>
+      isFormStateRequest({ pageURL: editURL, request: response.request() }),
+    )
+
+    release()
+    await answered
+  }
+}
+
+// Names the collection: a lock on a document of another collection can hold the same ID
+async function findPostLocks(id: Post['id']): Promise<PayloadLockedDocument[]> {
+  const { docs } = await payload.find({
+    collection: lockedDocumentCollection,
+    pagination: false,
+    where: {
+      and: [{ 'document.relationTo': { equals: 'posts' } }, { 'document.value': { equals: id } }],
+    },
+  })
+
+  return docs
 }
 
 async function createPostDoc(data: Partial<Post>): Promise<Post> {
