@@ -5,6 +5,7 @@ import { buildConfigWithDefaults } from '../buildConfigWithDefaults.js'
 import { AutosaveCollection } from './collections/Autosave/index.js'
 import { PagesCollection } from './collections/Pages/index.js'
 import { PostsCollection } from './collections/Posts/index.js'
+import { RestrictedCollection } from './collections/Restricted/index.js'
 import { ServerComponentsCollection } from './collections/ServerComponents/index.js'
 import { SimpleCollection } from './collections/Simple/index.js'
 import { SimpleWithVersionsCollection } from './collections/SimpleWithVersions/index.js'
@@ -14,6 +15,7 @@ import { AdminGlobal } from './globals/Admin/index.js'
 import { AutosaveGlobal } from './globals/AutosaveGlobal/index.js'
 import { GlobalWithVersions } from './globals/GlobalWithVersions/index.js'
 import { MenuGlobal } from './globals/Menu/index.js'
+import { RestrictedGlobal } from './globals/Restricted/index.js'
 import { seed } from './seed.js'
 
 const filename = fileURLToPath(import.meta.url)
@@ -29,13 +31,14 @@ export default buildConfigWithDefaults({
     AutosaveCollection,
     PagesCollection,
     PostsCollection,
+    RestrictedCollection,
     ServerComponentsCollection,
     SimpleCollection,
     SimpleWithVersionsCollection,
     TestsCollection,
     Users,
   ],
-  globals: [AdminGlobal, AutosaveGlobal, GlobalWithVersions, MenuGlobal],
+  globals: [AdminGlobal, AutosaveGlobal, GlobalWithVersions, MenuGlobal, RestrictedGlobal],
   onInit: async (payload) => {
     if (process.env.SEED_IN_CONFIG_ONINIT !== 'false') {
       await seed(payload)

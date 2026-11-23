@@ -2,6 +2,8 @@ export const pagesSlug = 'pages'
 
 export const postsSlug = 'posts'
 
+export const restrictedSlug = 'restricted'
+
 export const simpleSlug = 'simple'
 
 export const simpleWithVersionsSlug = 'simple-with-versions'
@@ -18,6 +20,7 @@ export const collectionSlugs = [
   autosaveSlug,
   pagesSlug,
   postsSlug,
+  restrictedSlug,
   simpleSlug,
   simpleWithVersionsSlug,
   usersSlug,

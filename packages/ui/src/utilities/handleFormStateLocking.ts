@@ -1,5 +1,7 @@
 import type { PayloadRequest, TypedUser } from 'payload'
 
+import { canLockDocument } from 'payload'
+
 type Args = {
   collectionSlug?: string
   globalSlug?: string
@@ -32,6 +34,11 @@ export const handleFormStateLocking = async ({
   }
 
   if (id || globalSlug) {
+    // This function creates and refreshes locks without access control
+    if (!(await canLockDocument({ id, collectionSlug, globalSlug, req }))) {
+      return result
+    }
+
     let lockedDocumentQuery
 
     if (collectionSlug) {

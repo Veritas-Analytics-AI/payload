@@ -70,6 +70,7 @@ export interface Config {
     autosave: Autosave;
     pages: Page;
     posts: Post;
+    restricted: Restricted;
     'server-components': ServerComponent;
     simple: Simple;
     'simple-with-versions': SimpleWithVersion;
@@ -85,6 +86,7 @@ export interface Config {
     autosave: AutosaveSelect<false> | AutosaveSelect<true>;
     pages: PagesSelect<false> | PagesSelect<true>;
     posts: PostsSelect<false> | PostsSelect<true>;
+    restricted: RestrictedSelect<false> | RestrictedSelect<true>;
     'server-components': ServerComponentsSelect<false> | ServerComponentsSelect<true>;
     simple: SimpleSelect<false> | SimpleSelect<true>;
     'simple-with-versions': SimpleWithVersionsSelect<false> | SimpleWithVersionsSelect<true>;
@@ -96,7 +98,7 @@ export interface Config {
     'payload-migrations': PayloadMigrationsSelect<false> | PayloadMigrationsSelect<true>;
   };
   db: {
-    defaultIDType: string;
+    defaultIDType: number;
   };
   fallbackLocale: null;
   globals: {
@@ -104,12 +106,14 @@ export interface Config {
     'autosave-global': AutosaveGlobal;
     'global-with-versions': GlobalWithVersion;
     menu: Menu;
+    'restricted-global': RestrictedGlobal;
   };
   globalsSelect: {
     admin: AdminSelect<false> | AdminSelect<true>;
     'autosave-global': AutosaveGlobalSelect<false> | AutosaveGlobalSelect<true>;
     'global-with-versions': GlobalWithVersionsSelect<false> | GlobalWithVersionsSelect<true>;
     menu: MenuSelect<false> | MenuSelect<true>;
+    'restricted-global': RestrictedGlobalSelect<false> | RestrictedGlobalSelect<true>;
   };
   locale: null;
   widgets: {
@@ -144,7 +148,7 @@ export interface UserAuthOperations {
  * via the `definition` "autosave".
  */
 export interface Autosave {
-  id: string;
+  id: number;
   fieldA?: string | null;
   fieldB?: string | null;
   updatedAt: string;
@@ -156,7 +160,7 @@ export interface Autosave {
  * via the `definition` "pages".
  */
 export interface Page {
-  id: string;
+  id: number;
   text?: string | null;
   updatedAt: string;
   createdAt: string;
@@ -167,7 +171,7 @@ export interface Page {
  * via the `definition` "posts".
  */
 export interface Post {
-  id: string;
+  id: number;
   text?: string | null;
   richText?: {
     root: {
@@ -191,10 +195,49 @@ export interface Post {
 }
 /**
  * This interface was referenced by `Config`'s JSON-Schema
+ * via the `definition` "restricted".
+ */
+export interface Restricted {
+  id: number;
+  text?: string | null;
+  owner?: (number | null) | User;
+  updatedAt: string;
+  createdAt: string;
+}
+/**
+ * This interface was referenced by `Config`'s JSON-Schema
+ * via the `definition` "users".
+ */
+export interface User {
+  id: number;
+  name?: string | null;
+  roles?: ('is_user' | 'is_admin')[] | null;
+  updatedAt: string;
+  createdAt: string;
+  email: string;
+  resetPasswordToken?: string | null;
+  resetPasswordExpiration?: string | null;
+  salt?: string | null;
+  hash?: string | null;
+  resetPasswordRequestedAt?: string | null;
+  loginAttempts?: number | null;
+  lockUntil?: string | null;
+  sessions?:
+    | {
+        id: string;
+        createdAt?: string | null;
+        expiresAt: string;
+      }[]
+    | null;
+  password?: string | null;
+  collection: 'users';
+}
+/**
+ * This interface was referenced by `Config`'s JSON-Schema
  * via the `definition` "server-components".
  */
 export interface ServerComponent {
-  id: string;
+  id: number;
   customTextServer?: string | null;
   richText?: {
     root: {
@@ -219,7 +262,7 @@ export interface ServerComponent {
  * via the `definition` "simple".
  */
 export interface Simple {
-  id: string;
+  id: number;
   fieldA?: string | null;
   fieldB?: string | null;
   updatedAt: string;
@@ -230,7 +273,7 @@ export interface Simple {
  * via the `definition` "simple-with-versions".
  */
 export interface SimpleWithVersion {
-  id: string;
+  id: number;
   fieldA?: string | null;
   fieldB?: string | null;
   updatedAt: string;
@@ -242,7 +285,7 @@ export interface SimpleWithVersion {
  * via the `definition` "tests".
  */
 export interface Test {
-  id: string;
+  id: number;
   text?: string | null;
   updatedAt: string;
   createdAt: string;
@@ -250,37 +293,10 @@ export interface Test {
 }
 /**
  * This interface was referenced by `Config`'s JSON-Schema
- * via the `definition` "users".
- */
-export interface User {
-  id: string;
-  name?: string | null;
-  roles?: ('is_user' | 'is_admin')[] | null;
-  updatedAt: string;
-  createdAt: string;
-  email: string;
-  resetPasswordToken?: string | null;
-  resetPasswordExpiration?: string | null;
-  salt?: string | null;
-  hash?: string | null;
-  loginAttempts?: number | null;
-  lockUntil?: string | null;
-  sessions?:
-    | {
-        id: string;
-        createdAt?: string | null;
-        expiresAt: string;
-      }[]
-    | null;
-  password?: string | null;
-  collection: 'users';
-}
-/**
- * This interface was referenced by `Config`'s JSON-Schema
  * via the `definition` "payload-kv".
  */
 export interface PayloadKv {
-  id: string;
+  id: number;
   key: string;
   data:
     | {
@@ -297,40 +313,44 @@ export interface PayloadKv {
  * via the `definition` "payload-locked-documents".
  */
 export interface PayloadLockedDocument {
-  id: string;
+  id: number;
   document?:
     | ({
         relationTo: 'autosave';
-        value: string | Autosave;
+        value: number | Autosave;
       } | null)
     | ({
         relationTo: 'posts';
-        value: string | Post;
+        value: number | Post;
+      } | null)
+    | ({
+        relationTo: 'restricted';
+        value: number | Restricted;
       } | null)
     | ({
         relationTo: 'server-components';
-        value: string | ServerComponent;
+        value: number | ServerComponent;
       } | null)
     | ({
         relationTo: 'simple';
-        value: string | Simple;
+        value: number | Simple;
       } | null)
     | ({
         relationTo: 'simple-with-versions';
-        value: string | SimpleWithVersion;
+        value: number | SimpleWithVersion;
       } | null)
     | ({
         relationTo: 'tests';
-        value: string | Test;
+        value: number | Test;
       } | null)
     | ({
         relationTo: 'users';
-        value: string | User;
+        value: number | User;
       } | null);
   globalSlug?: string | null;
   user: {
     relationTo: 'users';
-    value: string | User;
+    value: number | User;
   };
   updatedAt: string;
   createdAt: string;
@@ -340,10 +360,10 @@ export interface PayloadLockedDocument {
  * via the `definition` "payload-preferences".
  */
 export interface PayloadPreference {
-  id: string;
+  id: number;
   user: {
     relationTo: 'users';
-    value: string | User;
+    value: number | User;
   };
   key?: string | null;
   value?:
@@ -363,7 +383,7 @@ export interface PayloadPreference {
  * via the `definition` "payload-migrations".
  */
 export interface PayloadMigration {
-  id: string;
+  id: number;
   name?: string | null;
   batch?: number | null;
   updatedAt: string;
@@ -401,6 +421,16 @@ export interface PostsSelect<T extends boolean = true> {
   updatedAt?: T;
   createdAt?: T;
   _status?: T;
+}
+/**
+ * This interface was referenced by `Config`'s JSON-Schema
+ * via the `definition` "restricted_select".
+ */
+export interface RestrictedSelect<T extends boolean = true> {
+  text?: T;
+  owner?: T;
+  updatedAt?: T;
+  createdAt?: T;
 }
 /**
  * This interface was referenced by `Config`'s JSON-Schema
@@ -457,6 +487,7 @@ export interface UsersSelect<T extends boolean = true> {
   resetPasswordExpiration?: T;
   salt?: T;
   hash?: T;
+  resetPasswordRequestedAt?: T;
   loginAttempts?: T;
   lockUntil?: T;
   sessions?:
@@ -512,7 +543,7 @@ export interface PayloadMigrationsSelect<T extends boolean = true> {
  * via the `definition` "admin".
  */
 export interface Admin {
-  id: string;
+  id: number;
   adminText?: string | null;
   updatedAt?: string | null;
   createdAt?: string | null;
@@ -522,7 +553,7 @@ export interface Admin {
  * via the `definition` "autosave-global".
  */
 export interface AutosaveGlobal {
-  id: string;
+  id: number;
   text?: string | null;
   _status?: ('draft' | 'published') | null;
   updatedAt?: string | null;
@@ -533,7 +564,7 @@ export interface AutosaveGlobal {
  * via the `definition` "global-with-versions".
  */
 export interface GlobalWithVersion {
-  id: string;
+  id: number;
   text?: string | null;
   _status?: ('draft' | 'published') | null;
   updatedAt?: string | null;
@@ -544,8 +575,18 @@ export interface GlobalWithVersion {
  * via the `definition` "menu".
  */
 export interface Menu {
-  id: string;
+  id: number;
   globalText?: string | null;
+  updatedAt?: string | null;
+  createdAt?: string | null;
+}
+/**
+ * This interface was referenced by `Config`'s JSON-Schema
+ * via the `definition` "restricted-global".
+ */
+export interface RestrictedGlobal {
+  id: number;
+  text?: string | null;
   updatedAt?: string | null;
   createdAt?: string | null;
 }
@@ -587,6 +628,16 @@ export interface GlobalWithVersionsSelect<T extends boolean = true> {
  */
 export interface MenuSelect<T extends boolean = true> {
   globalText?: T;
+  updatedAt?: T;
+  createdAt?: T;
+  globalType?: T;
+}
+/**
+ * This interface was referenced by `Config`'s JSON-Schema
+ * via the `definition` "restricted-global_select".
+ */
+export interface RestrictedGlobalSelect<T extends boolean = true> {
+  text?: T;
   updatedAt?: T;
   createdAt?: T;
   globalType?: T;

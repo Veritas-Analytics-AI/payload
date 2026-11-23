@@ -1,9 +1,47 @@
-import type { CollectionConfig } from '../collections/config/types.js'
-import type { Config } from '../config/types.js'
+import type { CollectionConfig, TypeWithID } from '../collections/config/types.js'
+import type { Access, Config } from '../config/types.js'
+import type { JsonObject } from '../types/index.js'
 
-import { defaultAccess } from '../auth/defaultAccess.js'
+import { canLockDocument } from './canLockDocument.js'
 
 export const lockedDocumentsCollectionSlug = 'payload-locked-documents'
+
+// A user reads, changes and deletes the locks of the documents and globals they may update. That
+// depends on each locked document, so the locks are read to answer with the ones permitted.
+const readAccess: Access = async ({ id, req }) => {
+  if (!req.user) {
+    return false
+  }
+
+  const { docs: locks } = await req.payload.db.find<JsonObject & TypeWithID>({
+    collection: lockedDocumentsCollectionSlug,
+    pagination: false,
+    req,
+    where: id ? { id: { equals: id } } : {},
+  })
+
+  const permittedLockIDs: (number | string)[] = []
+
+  for (const lock of locks) {
+    const canLock = await canLockDocument({
+      id: lock.document?.value,
+      collectionSlug: lock.document?.relationTo,
+      globalSlug: lock.globalSlug,
+      req,
+    })
+
+    if (canLock) {
+      permittedLockIDs.push(lock.id)
+    }
+  }
+
+  return { id: { in: permittedLockIDs } }
+}
+
+// A lock is changed or deleted by its ID, which is all the admin does. A change of several locks
+// is refused: a user's permissions are built by calling each access function without an ID, and
+// this keeps that to one read of the locks.
+const changeAccess: Access = (args) => (args.id ? readAccess(args) : false)
 
 export const getLockedDocumentsCollection = (config: Config): CollectionConfig | null => {
   const lockableCollections = config
@@ -36,6 +74,9 @@ export const getLockedDocumentsCollection = (config: Config): CollectionConfig |
     fields.push({
       name: 'document',
       type: 'relationship',
+      access: {
+        update: () => false,
+      },
       index: true,
       maxDepth: 0,
       relationTo: lockableCollections,
@@ -46,6 +87,9 @@ export const getLockedDocumentsCollection = (config: Config): CollectionConfig |
   fields.push({
     name: 'globalSlug',
     type: 'text',
+    access: {
+      update: () => false,
+    },
     index: true,
   })
 
@@ -53,6 +97,15 @@ export const getLockedDocumentsCollection = (config: Config): CollectionConfig |
   fields.push({
     name: 'user',
     type: 'relationship',
+    hooks: {
+      beforeValidate: [
+        // A change made with access control names its own user: a lock is only taken over
+        ({ overrideAccess, req, value }) =>
+          overrideAccess || !req.user
+            ? value
+            : { relationTo: req.user.collection, value: req.user.id },
+      ],
+    },
     maxDepth: 1,
     relationTo: authCollections,
     required: true,
@@ -61,10 +114,11 @@ export const getLockedDocumentsCollection = (config: Config): CollectionConfig |
   return {
     slug: lockedDocumentsCollectionSlug,
     access: {
-      create: defaultAccess,
-      delete: defaultAccess,
-      read: defaultAccess,
-      update: defaultAccess,
+      // Locks are created on the server, by the form state of a document being edited
+      create: () => false,
+      delete: changeAccess,
+      read: readAccess,
+      update: changeAccess,
     },
     admin: {
       hidden: true,
