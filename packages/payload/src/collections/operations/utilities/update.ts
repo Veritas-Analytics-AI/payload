@@ -26,6 +26,7 @@ import type {
 import { ensureUsernameOrEmail } from '../../../auth/ensureUsernameOrEmail.js'
 import { removeOtherSessions } from '../../../auth/sessions.js'
 import { generatePasswordSaltHash } from '../../../auth/strategies/local/generatePasswordSaltHash.js'
+import { NotFound } from '../../../errors/index.js'
 import { afterChange } from '../../../fields/hooks/afterChange/index.js'
 import { afterRead } from '../../../fields/hooks/afterRead/index.js'
 import { beforeChange } from '../../../fields/hooks/beforeChange/index.js'
@@ -474,6 +475,11 @@ export const updateDocument = async <
       locale,
       req,
     })
+
+    // the document was deleted since it was read
+    if (!result) {
+      throw new NotFound(req.t)
+    }
   }
 
   if (jobClaim) {
