@@ -205,5 +205,5 @@ export const sanitizeSelect = ({
   // The merge and the virtual relations write `true` over an object, and when that object made the
   // select read as one that includes fields, a later `false` makes it read as excluding, which
   // leaves out the fields they wrote.
-  return getSelectMode(select) === 'include' ? select : undefined
+  return select && getSelectMode(select) === 'include' ? select : undefined
 }
