@@ -244,7 +244,8 @@ describe('Access Control', () => {
         expect(permissions.fields.first?.blocks?.shared?.fields.title?.read?.permission).toBe(true)
         expect(permissions.fields.second?.blocks?.shared?.fields.title?.read?.permission).toBe(true)
         expect(evaluations).toBe(1)
-        expect(permissions.fields.first?.blocks?.shared).not.toBe(
+        // Unlike upstream, the occurrences share one object: sanitizePermissions sanitizes it once.
+        expect(permissions.fields.first?.blocks?.shared).toBe(
           permissions.fields.second?.blocks?.shared,
         )
         const sanitized = sanitizePermissions({ collections: { [entity.slug]: permissions } })
