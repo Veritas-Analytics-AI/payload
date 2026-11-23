@@ -2600,6 +2600,65 @@ describe('Select', () => {
     })
   })
 
+  it('should force collection select fields with forceSelect when select excludes them', async () => {
+    const doc = await payload.create({
+      collection: 'force-select',
+      data: {
+        array: [{ forceSelected: 'text' }],
+        forceSelected: 'force-selected',
+        text: 'some-text',
+      },
+    })
+
+    const response = await payload.findByID({
+      id: doc.id,
+      collection: 'force-select',
+      select: { array: { forceSelected: false }, forceSelected: false, text: false },
+    })
+
+    expect(response).toEqual({ ...doc, text: undefined })
+  })
+
+  it('should force collection select fields with forceSelect when select both includes and excludes fields', async () => {
+    const doc = await payload.create({
+      collection: 'force-select',
+      data: {
+        array: [{ forceSelected: 'text' }],
+        forceSelected: 'force-selected',
+        text: 'some-text',
+      },
+    })
+
+    const response = await payload.findByID({
+      id: doc.id,
+      collection: 'force-select',
+      // @ts-expect-error a REST select, such as select[forceSelected]=false&select[text]=true, can mix true and false
+      select: { forceSelected: false, text: true },
+    })
+
+    expect(response).toEqual(doc)
+  })
+
+  it('should force collection select fields with forceSelect when select holds an object for a forced field', async () => {
+    const doc = await payload.create({
+      collection: 'force-select',
+      data: {
+        array: [{ forceSelected: 'text' }],
+        forceSelected: 'force-selected',
+        text: 'some-text',
+      },
+    })
+
+    const response = await payload.findByID({
+      id: doc.id,
+      collection: 'force-select',
+      // @ts-expect-error a REST select, such as select[forceSelected][a]=true, can hold an object for any field
+      select: { forceSelected: { a: true }, text: false },
+    })
+
+    expect(response).toEqual(doc)
+  })
+
   it('should force global select fields with forceSelect', async () => {
     const { forceSelected, id, array, text } = await payload.updateGlobal({
       slug: 'force-select-global',

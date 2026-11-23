@@ -1,7 +1,7 @@
 import { deepMergeSimple } from '@payloadcms/translations/utilities'
 
 import type { FlattenedField } from '../fields/config/types.js'
-import type { SelectIncludeType, SelectType } from '../types/index.js'
+import type { SelectExcludeType, SelectIncludeType, SelectType } from '../types/index.js'
 
 import { getSelectMode } from './getSelectMode.js'
 
@@ -112,6 +112,35 @@ const resolveVirtualRelationsToSelect = ({
   return result
 }
 
+// An excluding select cannot exclude all of a field but its forced paths, so a field with any
+// forced path is read whole.
+const removeForcedExclusions = ({
+  forceSelect,
+  select,
+}: {
+  forceSelect: SelectType
+  select: SelectExcludeType
+}): SelectExcludeType => {
+  const result: SelectExcludeType = {}
+
+  for (const key in select) {
+    const forced = forceSelect[key]
+    const excluded = select[key]!
+
+    if (!forced) {
+      result[key] = excluded
+    } else if (typeof forced === 'object' && typeof excluded === 'object') {
+      const nested = removeForcedExclusions({ forceSelect: forced, select: excluded })
+
+      if (Object.keys(nested).length) {
+        result[key] = nested
+      }
+    }
+  }
+
+  return result
+}
+
 export const sanitizeSelect = ({
   fields,
   forceSelect,
@@ -130,7 +159,16 @@ export const sanitizeSelect = ({
   const selectMode = getSelectMode(select)
 
   if (selectMode === 'exclude') {
-    return select
+    if (!forceSelect) {
+      return select
+    }
+
+    const exclusions = removeForcedExclusions({ forceSelect, select: select as SelectExcludeType })
+
+    // getSelectMode reads a select by its first `false` or object, so what is left of a select
+    // that also holds `true` can read as one that includes fields, which leaves out the forced ones.
+    // Nothing left to exclude reads the same.
+    return getSelectMode(exclusions) === 'exclude' ? exclusions : undefined
   }
 
   if (forceSelect) {
@@ -164,5 +202,8 @@ export const sanitizeSelect = ({
     }
   }
 
-  return select
+  // The merge and the virtual relations write `true` over an object, and when that object made the
+  // select read as one that includes fields, a later `false` makes it read as excluding, which
+  // leaves out the fields they wrote.
+  return select && getSelectMode(select) === 'include' ? select : undefined
 }
