@@ -2632,7 +2632,28 @@ describe('Select', () => {
     const response = await payload.findByID({
       id: doc.id,
       collection: 'force-select',
+      // @ts-expect-error a REST select, such as select[forceSelected]=false&select[text]=true, can mix true and false
       select: { forceSelected: false, text: true },
+    })
+
+    expect(response).toEqual(doc)
+  })
+
+  it('should force collection select fields with forceSelect when select holds an object for a forced field', async () => {
+    const doc = await payload.create({
+      collection: 'force-select',
+      data: {
+        array: [{ forceSelected: 'text' }],
+        forceSelected: 'force-selected',
+        text: 'some-text',
+      },
+    })
+
+    const response = await payload.findByID({
+      id: doc.id,
+      collection: 'force-select',
+      // @ts-expect-error a REST select, such as select[forceSelected][a]=true, can hold an object for any field
+      select: { forceSelected: { a: true }, text: false },
     })
 
     expect(response).toEqual(doc)
