@@ -1754,6 +1754,7 @@ export { updateOperation as updateOperationGlobal } from './globals/operations/u
 export * from './kv/adapters/DatabaseKVAdapter.js'
 export * from './kv/adapters/InMemoryKVAdapter.js'
 export * from './kv/index.js'
+export { canLockDocument } from './locked-documents/canLockDocument.js'
 export type {
   CollapsedPreferences,
   CollectionPreferences,

@@ -1,5 +1,7 @@
 import type { PayloadRequest, TypedUser } from 'payload'
 
+import { canLockDocument } from 'payload'
+
 type Args = {
   collectionSlug?: string
   globalSlug?: string
@@ -19,10 +21,14 @@ const lockDurationDefault = 300 // Default 5 minutes in seconds
 export const handleFormStateLocking = async ({
   id,
   collectionSlug,
-  globalSlug,
+  globalSlug: globalSlugFromArgs,
   req,
   updateLastEdited,
 }: Args): Promise<Result> => {
+  // A lock names one entity, the one whose access is checked below: the document of a collection
+  // when a collection is given, and a global only otherwise
+  const globalSlug = collectionSlug ? undefined : globalSlugFromArgs
+
   let result: Result
 
   // Check if the locked-documents collection exists
@@ -32,6 +38,11 @@ export const handleFormStateLocking = async ({
   }
 
   if (id || globalSlug) {
+    // This function creates and refreshes locks without access control
+    if (!(await canLockDocument({ id, collectionSlug, globalSlug, req }))) {
+      return result
+    }
+
     let lockedDocumentQuery
 
     if (collectionSlug) {

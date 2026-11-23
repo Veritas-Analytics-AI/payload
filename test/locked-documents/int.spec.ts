@@ -7,22 +7,26 @@ import type {
 } from 'payload'
 
 import path from 'path'
-import { Locked, NotFound } from 'payload'
+import { buildFormState } from '@payloadcms/ui/utilities/buildFormState'
+import { createLocalReq, Locked, NotFound } from 'payload'
 import { wait } from 'payload/shared'
 import { fileURLToPath } from 'url'
-import { afterAll, afterEach, beforeAll, expect } from 'vitest'
+import { afterAll, afterEach, beforeAll, beforeEach, expect } from 'vitest'
 
-import type { Post, User } from './payload-types.js'
+import type { NextRESTClient } from '../__helpers/shared/NextRESTClient.js'
+import type { Post, Restricted, User } from './payload-types.js'
 
 import { describe, it } from '../__helpers/int/vitest.js'
 import { initPayloadInt } from '../__helpers/shared/initPayloadInt.js'
-import { devUser } from '../credentials.js'
+import { devUser, regularUser } from '../credentials.js'
 import { menuSlug } from './globals/Menu/index.js'
-import { pagesSlug, postsSlug, simpleSlug, usersSlug } from './slugs.js'
+import { restrictedGlobalSlug } from './globals/Restricted/index.js'
+import { pagesSlug, postsSlug, restrictedSlug, simpleSlug, usersSlug } from './slugs.js'
 
 const lockedDocumentCollection = 'payload-locked-documents'
 
 let payload: Payload
+let restClient: NextRESTClient
 
 const filename = fileURLToPath(import.meta.url)
 const dirname = path.dirname(filename)
@@ -35,7 +39,7 @@ describe('Locked documents', () => {
 
   beforeAll(async () => {
     // @ts-expect-error: initPayloadInt does not have a proper type definition
-    ;({ payload } = await initPayloadInt(dirname))
+    ;({ payload, restClient } = await initPayloadInt(dirname))
 
     postConfig = payload.config.collections.find(
       ({ slug }) => slug === postsSlug,
@@ -651,6 +655,325 @@ describe('Locked documents', () => {
 
     expect(docsFromLocksCollection.docs).toHaveLength(1)
     expect((docsFromLocksCollection.docs[0]?.user.value as User)?.id).toEqual(user.id)
+  })
+
+  describe('Lock access', () => {
+    let regular: User
+    // The regular user owns this document, so may update it
+    let ownedDoc: Restricted
+    // Only admins may update this document
+    let foreignDoc: Restricted
+
+    const createLock = (data: { document?: Restricted; globalSlug?: string }) =>
+      payload.create({
+        collection: lockedDocumentCollection,
+        data: {
+          document: data.document
+            ? { relationTo: restrictedSlug, value: data.document.id }
+            : undefined,
+          globalSlug: data.globalSlug,
+          user: { relationTo: usersSlug, value: user.id },
+        },
+        depth: 0,
+      })
+
+    const findLock = (id: number | string) =>
+      payload.findByID({ id, collection: lockedDocumentCollection, depth: 0 })
+
+    const getLockedState = async ({
+      as,
+      collectionSlug = restrictedSlug,
+      doc,
+      globalSlug,
+      updateLastEdited,
+    }: {
+      as: User
+      collectionSlug?: string
+      doc?: Restricted
+      globalSlug?: string
+      updateLastEdited?: boolean
+    }) => {
+      const { lockedState } = await buildFormState({
+        id: doc?.id,
+        collectionSlug,
+        data: doc ?? {},
+        docPermissions: undefined,
+        docPreferences: { fields: {} },
+        documentFormState: undefined,
+        globalSlug,
+        mockRSCs: true,
+        operation: 'update',
+        renderAllFields: false,
+        req: await createLocalReq({ user: { ...as, collection: usersSlug } }, payload),
+        returnLockStatus: true,
+        schemaPath: collectionSlug,
+        updateLastEdited,
+      })
+
+      return lockedState
+    }
+
+    const countLocksOfRestrictedGlobal = async () => {
+      const { totalDocs } = await payload.count({
+        collection: lockedDocumentCollection,
+        where: { globalSlug: { equals: restrictedGlobalSlug } },
+      })
+
+      return totalDocs
+    }
+
+    beforeAll(async () => {
+      ;({
+        docs: [regular],
+      } = await payload.find({
+        collection: usersSlug,
+        where: { email: { equals: regularUser.email } },
+      }))
+
+      ownedDoc = await payload.create({
+        collection: restrictedSlug,
+        data: { owner: regular.id, text: 'owned' },
+        depth: 0,
+      })
+
+      foreignDoc = await payload.create({
+        collection: restrictedSlug,
+        data: { text: 'foreign' },
+        depth: 0,
+      })
+
+      await payload.updateGlobal({ slug: restrictedGlobalSlug, data: { text: 'restricted' } })
+    })
+
+    beforeEach(async () => {
+      await payload.delete({
+        collection: lockedDocumentCollection,
+        where: { id: { exists: true } },
+      })
+    })
+
+    it('should not create a lock over REST', async () => {
+      await restClient.login({ slug: usersSlug, credentials: devUser })
+
+      const response = await restClient.POST(`/${lockedDocumentCollection}`, {
+        body: JSON.stringify({
+          document: { relationTo: restrictedSlug, value: ownedDoc.id },
+          user: { relationTo: usersSlug, value: user.id },
+        }),
+      })
+
+      expect(response.status).toBe(403)
+
+      const { totalDocs } = await payload.count({ collection: lockedDocumentCollection })
+
+      expect(totalDocs).toBe(0)
+    })
+
+    it('should not create a lock over GraphQL', async () => {
+      await restClient.login({ slug: usersSlug, credentials: devUser })
+
+      const { errors } = await restClient
+        .GRAPHQL_POST({
+          body: JSON.stringify({
+            query: `mutation {
+              createPayloadLockedDocument(data: {
+                globalSlug: "${menuSlug}",
+                user: { relationTo: users, value: ${JSON.stringify(user.id)} }
+              }) { id }
+            }`,
+          }),
+        })
+        .then((res) => res.json())
+
+      expect(errors[0].extensions.statusCode).toBe(403)
+
+      const { totalDocs } = await payload.count({ collection: lockedDocumentCollection })
+
+      expect(totalDocs).toBe(0)
+    })
+
+    it('should hide a lock from a user who cannot update the locked document', async () => {
+      const locks = [
+        await createLock({ document: foreignDoc }),
+        await createLock({ globalSlug: restrictedGlobalSlug }),
+      ]
+
+      await restClient.login({ slug: usersSlug, credentials: regularUser })
+
+      const { docs } = await restClient
+        .GET(`/${lockedDocumentCollection}`)
+        .then((res) => res.json())
+
+      expect(docs).toHaveLength(0)
+
+      for (const lock of locks) {
+        const response = await restClient.GET(`/${lockedDocumentCollection}/${lock.id}`)
+
+        expect(response.status).toBe(404)
+      }
+    })
+
+    it('should not let a user who cannot update the locked document change or delete its lock', async () => {
+      const locks = [
+        await createLock({ document: foreignDoc }),
+        await createLock({ globalSlug: restrictedGlobalSlug }),
+      ]
+      const takeOver = {
+        body: JSON.stringify({ user: { relationTo: usersSlug, value: regular.id } }),
+      }
+
+      await restClient.login({ slug: usersSlug, credentials: regularUser })
+
+      for (const lock of locks) {
+        const updated = await restClient.PATCH(`/${lockedDocumentCollection}/${lock.id}`, takeOver)
+
+        expect(updated.status).toBe(403)
+
+        const deleted = await restClient.DELETE(`/${lockedDocumentCollection}/${lock.id}`)
+
+        expect(deleted.status).toBe(403)
+      }
+
+      const bulkUpdated = await restClient.PATCH(
+        `/${lockedDocumentCollection}?where[id][exists]=true`,
+        takeOver,
+      )
+
+      expect(bulkUpdated.status).toBe(403)
+
+      const bulkDeleted = await restClient.DELETE(
+        `/${lockedDocumentCollection}?where[id][exists]=true`,
+      )
+
+      expect(bulkDeleted.status).toBe(403)
+
+      for (const lock of locks) {
+        expect((await findLock(lock.id)).user.value).toBe(user.id)
+      }
+    })
+
+    it('should let a user who can update the locked document take over its lock, as themself only', async () => {
+      const lock = await createLock({ document: ownedDoc })
+
+      await restClient.login({ slug: usersSlug, credentials: regularUser })
+
+      // The admin UI finds the lock of the document, then names the current user on it
+      const { docs } = await restClient
+        .GET(
+          `/${lockedDocumentCollection}?where[document.relationTo][equals]=${restrictedSlug}&where[document.value][equals]=${ownedDoc.id}`,
+        )
+        .then((res) => res.json())
+
+      expect(docs).toHaveLength(1)
+
+      const response = await restClient.PATCH(`/${lockedDocumentCollection}/${docs[0].id}`, {
+        body: JSON.stringify({
+          document: { relationTo: restrictedSlug, value: foreignDoc.id },
+          user: { relationTo: usersSlug, value: user2.id },
+        }),
+      })
+
+      expect(response.status).toBe(200)
+
+      const takenOver = await findLock(lock.id)
+
+      expect(takenOver.user.value).toBe(regular.id)
+      expect(takenOver.document?.value).toBe(ownedDoc.id)
+    })
+
+    it('should let a user who can update the locked document delete its lock', async () => {
+      const lock = await createLock({ document: ownedDoc })
+
+      await restClient.login({ slug: usersSlug, credentials: regularUser })
+
+      const response = await restClient.DELETE(`/${lockedDocumentCollection}/${lock.id}`)
+
+      expect(response.status).toBe(200)
+
+      const { totalDocs } = await payload.count({ collection: lockedDocumentCollection })
+
+      expect(totalDocs).toBe(0)
+    })
+
+    it('should show the lock status of a document only to a user who can update it', async () => {
+      await createLock({ document: ownedDoc })
+      await createLock({ document: foreignDoc })
+
+      const { docs } = await payload.find({
+        collection: restrictedSlug,
+        includeLockStatus: true,
+        overrideAccess: false,
+        user: { ...regular, collection: usersSlug },
+      })
+
+      expect(docs.find(({ id }) => id === ownedDoc.id)?._isLocked).toBe(true)
+      expect(docs.find(({ id }) => id === foreignDoc.id)?._isLocked).toBe(false)
+    })
+
+    it('should lock a document for the user who edits it, and keep the lock while they edit', async () => {
+      const lockedState = await getLockedState({ as: user, doc: ownedDoc })
+
+      expect(lockedState?.isLocked).toBe(true)
+
+      const {
+        docs: [lock],
+      } = await payload.find({ collection: lockedDocumentCollection, depth: 0 })
+
+      expect(lock?.user.value).toBe(user.id)
+      expect(lock?.document?.value).toBe(ownedDoc.id)
+
+      // Another user who can update the document sees the lock, and gets none
+      const incomingLockedState = await getLockedState({ as: regular, doc: ownedDoc })
+      const editor = incomingLockedState?.user
+
+      expect(typeof editor === 'object' ? editor.id : editor).toBe(user.id)
+
+      await getLockedState({ as: user, doc: ownedDoc, updateLastEdited: true })
+
+      const { docs: locks } = await payload.find({ collection: lockedDocumentCollection })
+
+      expect(locks).toHaveLength(1)
+      expect(new Date(locks[0]!.updatedAt).getTime()).toBeGreaterThan(
+        new Date(lock!.updatedAt).getTime(),
+      )
+    })
+
+    it('should not lock a document for a user who cannot update it', async () => {
+      const lockedState = await getLockedState({ as: regular, doc: foreignDoc })
+
+      expect(lockedState).toBeUndefined()
+
+      const { totalDocs } = await payload.count({ collection: lockedDocumentCollection })
+
+      expect(totalDocs).toBe(0)
+    })
+
+    it('should not lock a global along with a document, for a user who cannot update the global', async () => {
+      await getLockedState({ as: regular, doc: ownedDoc, globalSlug: restrictedGlobalSlug })
+
+      expect(await countLocksOfRestrictedGlobal()).toBe(0)
+
+      const {
+        docs: [lock],
+      } = await payload.find({ collection: lockedDocumentCollection, depth: 0 })
+
+      expect(lock?.document?.value).toBe(ownedDoc.id)
+    })
+
+    it('should not lock a global along with a collection that has no document', async () => {
+      // Every user may update a post, so the update access of posts permits without an ID
+      const lockedState = await getLockedState({
+        as: regular,
+        collectionSlug: postsSlug,
+        globalSlug: restrictedGlobalSlug,
+      })
+
+      expect(lockedState).toBeUndefined()
+
+      const { totalDocs } = await payload.count({ collection: lockedDocumentCollection })
+
+      expect(totalDocs).toBe(0)
+    })
   })
 
   describe('Postgres lock transactions', { db: (adapter) => adapter === 'postgres' }, () => {
