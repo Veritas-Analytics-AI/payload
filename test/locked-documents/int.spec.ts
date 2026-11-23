@@ -680,24 +680,46 @@ describe('Locked documents', () => {
     const findLock = (id: number | string) =>
       payload.findByID({ id, collection: lockedDocumentCollection, depth: 0 })
 
-    const getLockedState = async (doc: Restricted, as: User, updateLastEdited?: boolean) => {
+    const getLockedState = async ({
+      as,
+      collectionSlug = restrictedSlug,
+      doc,
+      globalSlug,
+      updateLastEdited,
+    }: {
+      as: User
+      collectionSlug?: string
+      doc?: Restricted
+      globalSlug?: string
+      updateLastEdited?: boolean
+    }) => {
       const { lockedState } = await buildFormState({
-        id: doc.id,
-        collectionSlug: restrictedSlug,
-        data: doc,
+        id: doc?.id,
+        collectionSlug,
+        data: doc ?? {},
         docPermissions: undefined,
         docPreferences: { fields: {} },
         documentFormState: undefined,
+        globalSlug,
         mockRSCs: true,
         operation: 'update',
         renderAllFields: false,
         req: await createLocalReq({ user: { ...as, collection: usersSlug } }, payload),
         returnLockStatus: true,
-        schemaPath: restrictedSlug,
+        schemaPath: collectionSlug,
         updateLastEdited,
       })
 
       return lockedState
+    }
+
+    const countLocksOfRestrictedGlobal = async () => {
+      const { totalDocs } = await payload.count({
+        collection: lockedDocumentCollection,
+        where: { globalSlug: { equals: restrictedGlobalSlug } },
+      })
+
+      return totalDocs
     }
 
     beforeAll(async () => {
@@ -889,7 +911,7 @@ describe('Locked documents', () => {
     })
 
     it('should lock a document for the user who edits it, and keep the lock while they edit', async () => {
-      const lockedState = await getLockedState(ownedDoc, user)
+      const lockedState = await getLockedState({ as: user, doc: ownedDoc })
 
       expect(lockedState?.isLocked).toBe(true)
 
@@ -901,12 +923,12 @@ describe('Locked documents', () => {
       expect(lock?.document?.value).toBe(ownedDoc.id)
 
       // Another user who can update the document sees the lock, and gets none
-      const incomingLockedState = await getLockedState(ownedDoc, regular)
+      const incomingLockedState = await getLockedState({ as: regular, doc: ownedDoc })
       const editor = incomingLockedState?.user
 
       expect(typeof editor === 'object' ? editor.id : editor).toBe(user.id)
 
-      await getLockedState(ownedDoc, user, true)
+      await getLockedState({ as: user, doc: ownedDoc, updateLastEdited: true })
 
       const { docs: locks } = await payload.find({ collection: lockedDocumentCollection })
 
@@ -917,7 +939,34 @@ describe('Locked documents', () => {
     })
 
     it('should not lock a document for a user who cannot update it', async () => {
-      const lockedState = await getLockedState(foreignDoc, regular)
+      const lockedState = await getLockedState({ as: regular, doc: foreignDoc })
+
+      expect(lockedState).toBeUndefined()
+
+      const { totalDocs } = await payload.count({ collection: lockedDocumentCollection })
+
+      expect(totalDocs).toBe(0)
+    })
+
+    it('should not lock a global along with a document, for a user who cannot update the global', async () => {
+      await getLockedState({ as: regular, doc: ownedDoc, globalSlug: restrictedGlobalSlug })
+
+      expect(await countLocksOfRestrictedGlobal()).toBe(0)
+
+      const {
+        docs: [lock],
+      } = await payload.find({ collection: lockedDocumentCollection, depth: 0 })
+
+      expect(lock?.document?.value).toBe(ownedDoc.id)
+    })
+
+    it('should not lock a global along with a collection that has no document', async () => {
+      // Every user may update a post, so the update access of posts permits without an ID
+      const lockedState = await getLockedState({
+        as: regular,
+        collectionSlug: postsSlug,
+        globalSlug: restrictedGlobalSlug,
+      })
 
       expect(lockedState).toBeUndefined()
 

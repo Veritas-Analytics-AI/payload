@@ -12,7 +12,8 @@ type Args = {
 
 /**
  * Returns whether the user of the request may update the document or global. A lock is held,
- * read, changed and deleted only by a user who may.
+ * read, changed and deleted only by a user who may. Given a collection, the answer is for its
+ * document, whatever `globalSlug` is.
  */
 export const canLockDocument = async ({
   id,
@@ -33,7 +34,7 @@ export const canLockDocument = async ({
     entityConfig.access.update,
   )
 
-  if (typeof accessResult === 'object') {
+  if (accessResult && typeof accessResult === 'object') {
     return entityDocExists({
       id,
       slug: entityConfig.slug,

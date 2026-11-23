@@ -21,10 +21,14 @@ const lockDurationDefault = 300 // Default 5 minutes in seconds
 export const handleFormStateLocking = async ({
   id,
   collectionSlug,
-  globalSlug,
+  globalSlug: globalSlugFromArgs,
   req,
   updateLastEdited,
 }: Args): Promise<Result> => {
+  // A lock names one entity, the one whose access is checked below: the document of a collection
+  // when a collection is given, and a global only otherwise
+  const globalSlug = collectionSlug ? undefined : globalSlugFromArgs
+
   let result: Result
 
   // Check if the locked-documents collection exists
