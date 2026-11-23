@@ -2619,6 +2619,25 @@ describe('Select', () => {
     expect(response).toEqual({ ...doc, text: undefined })
   })
 
+  it('should force collection select fields with forceSelect when select both includes and excludes fields', async () => {
+    const doc = await payload.create({
+      collection: 'force-select',
+      data: {
+        array: [{ forceSelected: 'text' }],
+        forceSelected: 'force-selected',
+        text: 'some-text',
+      },
+    })
+
+    const response = await payload.findByID({
+      id: doc.id,
+      collection: 'force-select',
+      select: { forceSelected: false, text: true },
+    })
+
+    expect(response).toEqual(doc)
+  })
+
   it('should force global select fields with forceSelect', async () => {
     const { forceSelected, id, array, text } = await payload.updateGlobal({
       slug: 'force-select-global',

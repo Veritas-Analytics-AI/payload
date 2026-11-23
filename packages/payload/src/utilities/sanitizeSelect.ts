@@ -165,7 +165,10 @@ export const sanitizeSelect = ({
 
     const exclusions = removeForcedExclusions({ forceSelect, select: select as SelectExcludeType })
 
-    return Object.keys(exclusions).length ? exclusions : undefined
+    // getSelectMode reads a select by its first `false` or object, so what is left of a select
+    // that also holds `true` can read as one that includes fields, which leaves out the forced ones.
+    // Nothing left to exclude reads the same.
+    return getSelectMode(exclusions) === 'exclude' ? exclusions : undefined
   }
 
   if (forceSelect) {
