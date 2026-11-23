@@ -209,6 +209,10 @@ export function DefaultEditView({
 
   const nextHrefRef = React.useRef<null | string>(null)
 
+  // True once the user has confirmed leaving the document. A form state request locks a document
+  // that it finds unlocked, so one answered after that locks a document that nobody is editing
+  const hasLeftRef = useRef(false)
+
   const handleDocumentLocking = useCallback(
     (lockedState: LockedState) => {
       setDocumentIsLocked(true)
@@ -264,12 +268,14 @@ export function DefaultEditView({
     const isLockOwnedByCurrentUser =
       typeof lockUser === 'object' ? lockUser?.id === user?.id : lockUser === user?.id
 
-    if (isLockingEnabled && documentIsLocked && (id || globalSlug)) {
+    if (isLockingEnabled && (id || globalSlug)) {
       // Check where user is trying to go
       const nextPath = nextHrefRef.current ? new URL(nextHrefRef.current).pathname : ''
       const isInternalView = ['/preview', '/api', '/versions'].some((path) =>
         nextPath.includes(path),
       )
+
+      hasLeftRef.current = !isInternalView
 
       // Remove the lock if the user is navigating away from the document view they have locked
       if (isLockOwnedByCurrentUser && !isInternalView) {
@@ -284,7 +290,6 @@ export function DefaultEditView({
     }
   }, [
     collectionSlug,
-    documentIsLocked,
     documentLockState,
     globalSlug,
     id,
@@ -518,7 +523,7 @@ export function DefaultEditView({
         originalUpdatedAt: checkForStaleData ? originalUpdatedAtRef.current : undefined,
         readOnly: isTrashed || isReadOnlyForIncomingUser,
         renderAllFields: false,
-        returnLockStatus: isLockingEnabled,
+        returnLockStatus: isLockingEnabled && !hasLeftRef.current,
         schemaPath: schemaPathSegments.join('.'),
         signal: controller.signal,
         skipValidation: !submitted,
@@ -533,6 +538,11 @@ export function DefaultEditView({
 
       if (isLockingEnabled) {
         handleDocumentLocking(lockedState)
+
+        // A request sent before the user left may have locked the document since: unlock it again
+        if (hasLeftRef.current && lockedState) {
+          await handleLeaveConfirm()
+        }
       }
 
       // Handle stale data detection.
@@ -563,6 +573,7 @@ export function DefaultEditView({
       operation,
       schemaPathSegments,
       handleDocumentLocking,
+      handleLeaveConfirm,
       autosaveEnabled,
       isTrashed,
       isReadOnlyForIncomingUser,
