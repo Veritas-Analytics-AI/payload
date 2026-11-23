@@ -264,10 +264,11 @@ export const authenticateWithPassword = async <TSlug extends AuthCollectionSlug>
 type LoginUserArgs = {
   collection: Collection
   /**
-   * Leaves the user's login attempts as they are, for a sign-in that doesn't prove the password,
-   * so that it doesn't undo the lock that wrong passwords count towards.
+   * For a sign-in that doesn't prove the password, such as a passkey's. The lock that wrong
+   * passwords set doesn't refuse it, and it leaves the login attempts as they are, so the lock still
+   * refuses the password for its whole time.
    */
-  keepLoginAttempts?: boolean
+  passwordless?: boolean
   req: PayloadRequest
   user: TypedUser
 }
@@ -282,13 +283,13 @@ export type LoginUserResult = {
 
 /**
  * Logs in a user who is already authenticated, by `authenticateWithPassword` or any other way, as
- * login does: adds a session, resets the login attempts unless `keepLoginAttempts`, signs a token
- * and runs the `beforeLogin` and `afterLogin` hooks. Throws if the user is locked or has not
- * verified their email.
+ * login does: adds a session, resets the login attempts unless `passwordless`, signs a token
+ * and runs the `beforeLogin` and `afterLogin` hooks. Throws if the user has not verified their
+ * email or, unless `passwordless`, is locked.
  */
 export const loginUser = async ({
   collection: { config: collectionConfig },
-  keepLoginAttempts = false,
+  passwordless = false,
   req,
   req: {
     payload,
@@ -315,7 +316,7 @@ export const loginUser = async ({
      * Correct password accepted - re‑check that the account didn't
      * get locked by parallel bad attempts in the meantime.
      */
-    if (maxLoginAttemptsEnabled) {
+    if (maxLoginAttemptsEnabled && !passwordless) {
       const { lockUntil, loginAttempts } = (await payload.db.findOne<TypedUser>({
         collection: collectionConfig.slug,
         req,
@@ -355,7 +356,7 @@ export const loginUser = async ({
 
     const fieldsToSign = getFieldsToSign(fieldsToSignArgs)
 
-    if (maxLoginAttemptsEnabled && !keepLoginAttempts) {
+    if (maxLoginAttemptsEnabled && !passwordless) {
       await resetLoginAttempts({
         collection: collectionConfig,
         doc: user,

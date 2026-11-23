@@ -2966,34 +2966,40 @@ describe('Auth', () => {
         expect(jwtDecode<{ sid: string }>(token).sid).toStrictEqual(sid)
       })
 
-      it('should leave the login attempts of a user logged in with keepLoginAttempts', async () => {
+      it('should log in a locked user with passwordless, and leave the lock to the password', async () => {
         const created = await createLoginAttemptUser({
-          email: `login-user-attempts-${Date.now()}@example.com`,
+          email: `login-user-passwordless-${Date.now()}@example.com`,
         })
-        await payload.db.updateOne({
-          id: created.id,
-          collection: slug,
-          data: { loginAttempts: 3 },
-          returning: false,
-        })
+        await setLoginAttemptLock({ id: created.id })
         const user = await payload.db.findOne<User>({
           collection: slug,
           where: { id: { equals: created.id } },
         })
 
-        await loginUser({
+        const { token } = await loginUser({
           collection: payload.collections[slug],
-          keepLoginAttempts: true,
+          passwordless: true,
           req: await createLocalReq({}, payload),
           user: user!,
         })
 
+        const { user: authenticated } = await payload.auth({
+          headers: new Headers({ Authorization: `JWT ${token}` }),
+        })
+        expect(authenticated?.id).toStrictEqual(created.id)
         const stored = await payload.db.findOne<User>({
           collection: slug,
           where: { id: { equals: created.id } },
         })
-        expect(stored?.loginAttempts).toStrictEqual(3)
-        expect(stored?.sessions).toHaveLength(1)
+        expect(stored?.loginAttempts).toStrictEqual(user?.loginAttempts)
+        expect(stored?.lockUntil).toStrictEqual(user?.lockUntil)
+        await expect(
+          authenticateWithPassword({
+            collection: payload.collections[slug],
+            data: { email: created.email, password },
+            req: await createLocalReq({}, payload),
+          }),
+        ).rejects.toThrow('This user is locked due to having too many failed login attempts.')
       })
 
       it('should not log in a locked user authenticated without a password', async () => {
