@@ -26,11 +26,12 @@ import {
   initTransaction,
   isolateObjectProperty,
   killTransaction,
+  NotFound,
   QueryError,
 } from 'payload'
 import { assert } from 'ts-essentials'
 import { fileURLToPath } from 'url'
-import { afterAll, afterEach, beforeAll, beforeEach, expect } from 'vitest'
+import { afterAll, afterEach, beforeAll, beforeEach, expect, vi } from 'vitest'
 
 import type { NextRESTClient } from '../__helpers/shared/NextRESTClient.js'
 import type { Global2, Post } from './payload-types.js'
@@ -3314,6 +3315,38 @@ describe('database', () => {
       })
 
       expect(allPosts.docs).toHaveLength(0)
+    })
+
+    it('ensure updateOne by id does not create a deleted document again', async () => {
+      const post = await payload.create({ collection: postsSlug, data: { title: 'post' } })
+      await payload.db.deleteOne({ collection: postsSlug, where: { id: { equals: post.id } } })
+
+      const result = await payload.db.updateOne({
+        id: post.id,
+        collection: postsSlug,
+        data: { categories: [], title: 'updated' },
+      })
+
+      expect(result).toBeNull()
+      expect(
+        await payload.db.findOne({ collection: postsSlug, where: { id: { equals: post.id } } }),
+      ).toBeNull()
+    })
+
+    it('should throw NotFound when updating a document deleted since it was read', async () => {
+      const post = await payload.create({ collection: postsSlug, data: { title: 'post' } })
+      const updateOne = payload.db.updateOne.bind(payload.db)
+      vi.spyOn(payload.db, 'updateOne').mockImplementationOnce(async (args) => {
+        await payload.db.deleteOne({ collection: postsSlug, where: { id: { equals: post.id } } })
+        return updateOne(args)
+      })
+
+      await expect(
+        payload.update({ id: post.id, collection: postsSlug, data: { title: 'updated' } }),
+      ).rejects.toThrow(NotFound)
+      expect(
+        await payload.db.findOne({ collection: postsSlug, where: { id: { equals: post.id } } }),
+      ).toBeNull()
     })
   })
 
