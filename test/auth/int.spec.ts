@@ -1298,6 +1298,44 @@ describe('Auth', () => {
           expect(result.docs).toHaveLength(1)
         })
 
+        it('should refuse a create through the collection, over REST and GraphQL', async () => {
+          const createdKey = 'created-through-the-collection'
+
+          const rest = await restClient.POST('/payload-preferences', {
+            body: JSON.stringify({
+              key: createdKey,
+              user: { relationTo: 'users', value: loggedInUser.id },
+              value: { property },
+            }),
+            headers: {
+              Authorization: `JWT ${token}`,
+            },
+          })
+          const graphQL = await restClient.GRAPHQL_POST({
+            body: JSON.stringify({
+              query: `mutation {
+                createPayloadPreference(data: {
+                  key: "${createdKey}"
+                  user: { relationTo: users, value: ${JSON.stringify(loggedInUser.id)} }
+                }) {
+                  id
+                }
+              }`,
+            }),
+            headers: {
+              Authorization: `JWT ${token}`,
+            },
+          })
+
+          const { totalDocs } = await payload.count({
+            collection: 'payload-preferences',
+            where: { key: { equals: createdKey } },
+          })
+          expect(rest.status).toBe(403)
+          expect((await graphQL.json()).errors[0].extensions.statusCode).toBe(403)
+          expect(totalDocs).toBe(0)
+        })
+
         it('should delete', async () => {
           const response = await restClient.DELETE(`/payload-preferences/${key}`, {
             headers: {
