@@ -155,6 +155,12 @@ export const Categories: CollectionConfig = {
       },
     },
     {
+      name: 'relatedVersions',
+      type: 'join',
+      collection: versionsSlug,
+      on: 'category',
+    },
+    {
       name: 'polymorphic',
       type: 'join',
       collection: postsSlug,

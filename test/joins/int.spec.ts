@@ -946,6 +946,35 @@ describe('Joins Field', () => {
       expect(res.docs[0].relatedVersions.docs[0].title).toBe('updated-title')
     })
 
+    it('should populate joins filtered by ID to a collection with versions draft true', async () => {
+      const category = await payload.create({
+        collection: categoriesSlug,
+        data: { name: 'category with versions joined' },
+      })
+
+      try {
+        const version = await payload.create({
+          collection: 'versions',
+          data: { category: category.id, title: 'version' },
+        })
+        await payload.create({
+          collection: 'versions',
+          data: { category: category.id, title: 'other version' },
+        })
+
+        const res = await payload.findByID({
+          id: category.id,
+          collection: categoriesSlug,
+          draft: true,
+          joins: { relatedVersions: { where: { id: { equals: version.id } } } },
+        })
+
+        expect(res.relatedVersions?.docs?.map((doc) => doc.id)).toStrictEqual([version.id])
+      } finally {
+        await payload.delete({ id: category.id, collection: categoriesSlug })
+      }
+    })
+
     it('should populate joins when versions on both sides draft true payload.db.queryDrafts', async () => {
       const category = await payload.create({ collection: 'categories-versions', data: {} })
 

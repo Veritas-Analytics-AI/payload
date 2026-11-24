@@ -539,6 +539,19 @@ export const traverseFields = ({
           }
 
           if (useDrafts) {
+            // A where on the joined documents' IDs, such as their read access, selects the parent
+            // column already, and a second one makes the parent_id read below ambiguous.
+            for (const key in selectFields) {
+              const val = selectFields[key]
+
+              if (
+                val.name === newAliasTable.parent.name &&
+                getNameFromDrizzleTable(val.table) === getNameFromDrizzleTable(newAliasTable)
+              ) {
+                delete selectFields[key]
+              }
+            }
+
             selectFields.parent = newAliasTable.parent
           }
 
