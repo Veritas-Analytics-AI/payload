@@ -6,6 +6,15 @@ import { deleteHandler } from './requestHandlers/delete.js'
 import { findByIDHandler } from './requestHandlers/findOne.js'
 import { updateHandler } from './requestHandlers/update.js'
 
+export const MAX_PREFERENCE_KEY_LENGTH = 256
+
+export const MAX_PREFERENCE_VALUE_BYTES = 256 * 1024
+
+export const MAX_PREFERENCES_PER_USER = 5000
+
+export const isPreferenceValueTooLarge = (value: unknown) =>
+  Buffer.byteLength(JSON.stringify(value ?? null)) > MAX_PREFERENCE_VALUE_BYTES
+
 const preferenceAccess: Access = ({ req }) => {
   if (!req.user) {
     return false
@@ -33,6 +42,8 @@ export const preferencesCollectionSlug = 'payload-preferences'
 export const getPreferencesCollection = (config: Config): CollectionConfig => ({
   slug: preferencesCollectionSlug,
   access: {
+    // A preference is created by the /:key endpoint, which bounds it, or on the server
+    create: () => false,
     delete: preferenceAccess,
     read: preferenceAccess,
     update: preferenceAccess,
@@ -85,6 +96,7 @@ export const getPreferencesCollection = (config: Config): CollectionConfig => ({
       name: 'key',
       type: 'text',
       index: true,
+      maxLength: MAX_PREFERENCE_KEY_LENGTH,
     },
     {
       name: 'value',
@@ -92,7 +104,9 @@ export const getPreferencesCollection = (config: Config): CollectionConfig => ({
       validate: (value) => {
         if (value) {
           try {
-            JSON.parse(JSON.stringify(value))
+            if (isPreferenceValueTooLarge(value)) {
+              return 'Preference value too large'
+            }
           } catch {
             return 'Invalid JSON'
           }

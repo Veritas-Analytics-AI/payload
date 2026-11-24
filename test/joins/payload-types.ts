@@ -129,6 +129,7 @@ export interface Config {
       inTab: 'posts';
       joinWithError: 'posts';
       hiddenPosts: 'hidden-posts';
+      relatedVersions: 'versions';
       singulars: 'singular';
       polymorphicJoin: 'posts' | 'versions';
       polymorphicJoinNoRowTypes: 'posts' | 'versions';
@@ -608,6 +609,11 @@ export interface Category {
           value: string | Version;
         }
     )[];
+    hasNextPage?: boolean;
+    totalDocs?: number;
+  };
+  relatedVersions?: {
+    docs?: (string | Version)[];
     hasNextPage?: boolean;
     totalDocs?: number;
   };
@@ -1385,6 +1391,7 @@ export interface CategoriesSelect<T extends boolean = true> {
   blocksPosts?: T;
   polymorphicJoin?: T;
   polymorphicJoinNoRowTypes?: T;
+  relatedVersions?: T;
   polymorphic?: T;
   polymorphics?: T;
   localizedPolymorphic?: T;

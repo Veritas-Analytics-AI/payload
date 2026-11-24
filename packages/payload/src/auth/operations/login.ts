@@ -71,16 +71,25 @@ export const checkLoginPermission = <TSlug extends AuthCollectionSlug>({
 
 type AuthenticateWithPasswordArgs<TSlug extends AuthCollectionSlug> = {
   collection: Collection
+  /**
+   * For a signed-in user who confirms their password, whose caller limits their wrong passwords
+   * itself. The lock that wrong passwords set doesn't refuse it, and a wrong password doesn't count
+   * towards that lock, so that wrong passwords anyone else sends don't stop the user, and the
+   * user's own don't lock their sign-in.
+   */
+  confirmation?: boolean
   data: AuthOperationsFromCollectionSlug<TSlug>['login']
   req: PayloadRequest
 }
 
 /**
  * Finds the user that the email or username names and checks their password, as login does.
- * A wrong password counts towards `maxLoginAttempts`. No session starts: `loginUser` starts one.
+ * Unless `confirmation`, a wrong password counts towards `maxLoginAttempts` and a locked user is
+ * refused. No session starts: `loginUser` starts one.
  */
 export const authenticateWithPassword = async <TSlug extends AuthCollectionSlug>({
   collection: { config: collectionConfig },
+  confirmation = false,
   data,
   req,
   req: { payload },
@@ -187,11 +196,15 @@ export const authenticateWithPassword = async <TSlug extends AuthCollectionSlug>
     where: whereConstraint,
   })) as TypedUser
 
-  checkLoginPermission({
-    loggingInWithUsername: Boolean(canLoginWithUsername && sanitizedUsername),
-    req,
-    user,
-  })
+  if (!confirmation) {
+    checkLoginPermission({
+      loggingInWithUsername: Boolean(canLoginWithUsername && sanitizedUsername),
+      req,
+      user,
+    })
+  } else if (!user) {
+    throw new AuthenticationError(req.t, Boolean(canLoginWithUsername && sanitizedUsername))
+  }
 
   const authenticatedHash = user.hash
   const authenticatedSalt = user.salt
@@ -203,7 +216,7 @@ export const authenticateWithPassword = async <TSlug extends AuthCollectionSlug>
   user = sanitizeInternalFields(user)
 
   if (!authResult) {
-    if (collectionConfig.auth.maxLoginAttempts > 0) {
+    if (collectionConfig.auth.maxLoginAttempts > 0 && !confirmation) {
       await incrementLoginAttempts({
         collection: collectionConfig,
         payload: req.payload,
