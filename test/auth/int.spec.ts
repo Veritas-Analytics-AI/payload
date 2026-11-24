@@ -2944,6 +2944,54 @@ describe('Auth', () => {
         )
       })
 
+      it('should check the password of a locked user with confirmation, and leave the lock to login', async () => {
+        const created = await createLoginAttemptUser({
+          email: `password-confirmation-${Date.now()}@example.com`,
+        })
+        await setLoginAttemptLock({ id: created.id })
+        const locked = await payload.db.findOne<User>({
+          collection: slug,
+          where: { id: { equals: created.id } },
+        })
+        const confirm = async (passwordToCheck: string) =>
+          authenticateWithPassword({
+            collection: payload.collections[slug],
+            confirmation: true,
+            data: { email: created.email, password: passwordToCheck },
+            req: await createLocalReq({}, payload),
+          })
+
+        expect((await confirm(password)).id).toStrictEqual(created.id)
+        // more wrong passwords than the collection's maxLoginAttempts
+        for (let attempt = 0; attempt < 3; attempt++) {
+          await expect(confirm('wrong-password')).rejects.toThrow(
+            'The email or password provided is incorrect.',
+          )
+        }
+        expect((await confirm(password)).id).toStrictEqual(created.id)
+
+        const stored = await payload.db.findOne<User>({
+          collection: slug,
+          where: { id: { equals: created.id } },
+        })
+        expect(stored?.loginAttempts).toStrictEqual(locked?.loginAttempts)
+        expect(stored?.lockUntil).toStrictEqual(locked?.lockUntil)
+        await expect(attemptLogin(created.email, password)).rejects.toThrow(
+          'This user is locked due to having too many failed login attempts.',
+        )
+      })
+
+      it('should not confirm the password of a user who does not exist', async () => {
+        await expect(
+          authenticateWithPassword({
+            collection: payload.collections[slug],
+            confirmation: true,
+            data: { email: `no-user-${Date.now()}@example.com`, password },
+            req: await createLocalReq({}, payload),
+          }),
+        ).rejects.toThrow('The email or password provided is incorrect.')
+      })
+
       it('should log in a user authenticated without a password', async () => {
         const created = await createLoginAttemptUser({
           email: `login-user-${Date.now()}@example.com`,
